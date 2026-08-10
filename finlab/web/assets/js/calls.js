@@ -280,12 +280,65 @@
     ]);
   }
 
+  /* ------------------------------------------- dossiê do regime (compacto) */
+  /* O painel standalone de regime saiu da página (spec 3.7): o badge do
+     strip abre esta aba, e o dossiê — o que o regime quebra no valuation,
+     o tratamento do fluxo-base e as evidências contábeis — mora aqui. */
+
+  function blocoRegime() {
+    const r = (state.dados && state.dados().regime) || null;
+    if (!r) return h('div');
+    const box = h('div', {}, [
+      h('div', { class: 'regime-h', style: 'margin-top:16px' },
+        'Em que momento a empresa está')
+    ]);
+    if (!r.codigo) {
+      box.appendChild(h('div', {
+        class: 'callout warn',
+        html: '<b>Não dá para classificar o momento desta empresa.</b> '
+          + esc(r.motivo || '') + '. O painel prefere dizer isso a chutar '
+          + '"operação normal".'
+      }));
+      return box;
+    }
+    box.appendChild(h('div', { class: 'regime-cols' }, [
+      h('div', {}, [
+        h('div', { class: 'regime-h' }, 'O que isso quebra no valuation'),
+        h('div', { class: 'regime-txt' }, r.quebra)
+      ]),
+      h('div', {}, [
+        h('div', { class: 'regime-h' }, 'Tratamento indicado do fluxo-base'),
+        h('div', { class: 'regime-txt' }, r.fluxo)
+      ])
+    ]));
+    const evid = r.evidencias || [];
+    if (evid.length) {
+      box.appendChild(h('div', { class: 'regime-h', style: 'margin-top:12px' },
+        'Em que isso se apoia'));
+      box.appendChild(h('ul', { class: 'regime-evid' }, evid.map((e) => h('li', {}, [
+        h('span', { class: 'regime-ano' }, String(e.exercicio)),
+        h('span', {}, e.texto),
+        typeof e.valor === 'number' && isFinite(e.valor) && Math.abs(e.valor) > 1000
+          ? h('b', { style: 'margin-left:6px' }, fmt.bigShort(e.valor, 1)) : null
+      ]))));
+    }
+    box.appendChild(h('div', {
+      class: 'note',
+      html: '<b>A classificação é só contábil</b> — sai das demonstrações da '
+        + 'CVM. Guidance, troca de gestão e linguagem de call não entram, e '
+        + 'por isso a confiança não passa de <i>média</i>. As calls acima são '
+        + 'o complemento: o que a gestão DISSE, com a leitura do agente.'
+    }));
+    return box;
+  }
+
   /* ------------------------------------------------------------------ IPE */
 
   function blocoIpe() {
-    const docs = ((state.dados && state.dados().ipe) || {}).docs || [];
+    const dados = (state.dados && state.dados()) || {};
+    const docs = (dados.ipe || {}).docs || [];
     if (!docs.length) return h('div');
-    return h('div', {}, [
+    const box = h('div', {}, [
       h('div', { class: 'regime-h', style: 'margin-top:16px' },
         'O que a empresa comunicou à CVM'),
       h('ul', { class: 'regime-evid ipe-lista' }, docs.map((d) => h('li', {}, [
@@ -297,6 +350,21 @@
           : h('span', { class: 'ipe-assunto' }, d.assunto || '(sem assunto declarado)')
       ])))
     ]);
+    // A verdade sobre o que o painel LEU: com o índice de conteúdo, a mesa
+    // recebe trechos dos PDFs; sem ele, só os títulos — e o painel diz isso.
+    const idx = dados.docs || {};
+    box.appendChild(h('div', {
+      class: 'note',
+      html: idx.disponivel && idx.documentos
+        ? `<b>Conteúdo indexado.</b> O texto de <b>${idx.documentos}</b> `
+          + 'documento(s) está no índice local'
+          + (idx.ultimo ? ` (mais novo: ${fmt.date(idx.ultimo)})` : '')
+          + '. A mesa de IA recebe os trechos relevantes com data e link.'
+        : '<b>São os títulos, não o conteúdo.</b> Cada linha leva ao PDF na '
+          + 'CVM; para indexar o texto e a mesa citar trechos, rode o '
+          + 'pipeline com <code>--docs</code>.'
+    }));
+    return box;
   }
 
   /* ---------------------------------------------------------------- render */
@@ -310,6 +378,7 @@
     host.appendChild(blocoSlots());
     host.appendChild(blocoArquivo());
     host.appendChild(blocoAnalise());
+    host.appendChild(blocoRegime());
     host.appendChild(blocoIpe());
     host.appendChild(h('div', {
       class: 'note', style: 'margin-top:14px',
