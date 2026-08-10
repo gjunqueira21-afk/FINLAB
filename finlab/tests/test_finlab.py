@@ -3016,3 +3016,148 @@ def test_cagr_recusa_sinal_trocado():
     assert cvm._cagr([100.0, -20.0], 1) is None
     assert cvm._cagr([None, 100.0], 1) is None
     assert cvm._cagr([], 5) is None
+
+
+# ---------------------------------------------------------------------------
+# Planilha DCF exportada (spec 4.1 do redesenho)
+# ---------------------------------------------------------------------------
+
+def _prem_planilha(**sobrepor):
+    """Premissas mínimas no formato de valuation.assumptions — valores em R$
+    (a planilha converte para milhões)."""
+    prem = {
+        "fcf_media3": 4.8e9, "fcf_ultimo": 5.6e9,
+        "divida_liquida": -3.1e9,
+        "shares": 4.196e9, "preco": 41.20,
+        "growth": [0.12, 0.105, 0.09, 0.08, 0.07], "g_terminal": 0.05,
+        "rf": 0.131, "rf_fonte": "ANBIMA · prefixado ~10 anos",
+        "beta": 0.72, "erp": 0.045, "premio_extra": 0.0,
+        "spread_credito": 0.015, "wd": 0.05, "tax": 0.20, "wacc": 0.16,
+    }
+    prem.update(sobrepor)
+    return prem
+
+
+def _abrir_planilha(blob):
+    import io
+    from openpyxl import load_workbook
+    return load_workbook(io.BytesIO(blob))
+
+
+def test_planilha_dcf_tem_formulas_vivas_e_nunca_resultado_pronto():
+    """A regra central do endpoint: resultado é SEMPRE fórmula. Se a planilha
+    trouxesse números calculados em Python, um bug de conta ficaria escondido
+    atrás de um valor que parece certo."""
+    from finlab.backend import xlsx_dcf
+
+    blob = xlsx_dcf.planilha("WEGE3", _prem_planilha(),
+                             {"last_year": 2025, "financial": False})
+    wb = _abrir_planilha(blob)
+    ws = wb["DCF"]
+
+    # custo de capital e WACC, célula a célula como no arquivo de referência
+    assert ws["B29"].value == "=B20+B21*B22+B23"
+    assert ws["C30"].value == "=(C20+C24)*(1-C26)"
+    assert ws["D31"].value == "=D29*(1-D25)+D30*D25"
+
+    # projeção encadeada e valor presente
+    assert ws["C34"].value == "=C13*(1+C14)"
+    assert ws["C38"].value == "=C37*(1+C18)"
+    assert ws["B41"].value == "=B34/(1+B$31)^1"
+    assert ws["D45"].value == "=D38/(1+D$31)^5"
+    assert ws["C46"].value == "=SUM(C41:C45)"
+
+    # a guarda de Gordon: WACC ≤ g devolve "n/a", não um número sem sentido
+    assert ws["C47"].value == '=IF(C31<=C19,"n/a",C38*(1+C19)/(C31-C19))'
+    assert ws["C53"].value == '=IF(ISNUMBER(C51),C51/$B$9,"n/a")'
+    assert ws["B54"].value == '=IF(ISNUMBER(B53),B53/$B$10-1,"n/a")'
+
+    # nenhuma célula de resultado (linhas 29–54) veio como número pronto
+    for linha in range(29, 55):
+        for col in ("B", "C", "D"):
+            v = ws[f"{col}{linha}"].value
+            if v is not None:
+                assert str(v).startswith("="), f"{col}{linha} veio calculado: {v}"
+
+
+def test_planilha_dcf_dados_do_painel_e_tres_cenarios():
+    from finlab.backend import xlsx_dcf
+
+    blob = xlsx_dcf.planilha("WEGE3", _prem_planilha(),
+                             {"last_year": 2025, "financial": False})
+    ws = _abrir_planilha(blob)["DCF"]
+
+    # dados do painel em R$ milhões, com a célula de fonte ao lado
+    assert ws["B6"].value == 4800
+    assert ws["B7"].value == 5600
+    assert ws["B8"].value == -3100
+    assert ws["B9"].value == 4196
+    assert ws["B10"].value == 41.20
+    assert "DFC da CVM 2023–2025" in str(ws["C6"].value)
+
+    # três cenários: pessimista < mediana < otimista no crescimento e no g
+    assert ws["B12"].value == "Pessimista"
+    assert ws["C12"].value == "Mediana"
+    assert ws["D12"].value == "Otimista"
+    assert ws["C14"].value == pytest.approx(0.12)
+    assert ws["B14"].value < ws["C14"].value < ws["D14"].value
+    assert ws["B19"].value < ws["C19"].value < ws["D19"].value
+    assert ws["C19"].value == pytest.approx(0.05)
+    # beta pessimista é o MAIOR (mais desconto), como no arquivo de referência
+    assert ws["B21"].value > ws["C21"].value > ws["D21"].value
+    # FCL base igual nos três: o cenário mexe em crescimento e risco
+    assert ws["B13"].value == ws["C13"].value == ws["D13"].value == 4800
+
+    # células editáveis marcadas (fundo amarelo), dado do painel em cinza
+    assert ws["C14"].fill.start_color.rgb == "FFFFFF00"
+    assert ws["B6"].fill.start_color.rgb == "FFF2F2F2"
+    assert ws["C14"].font.color.rgb == "FF0000FF"
+    assert ws["A1"].font.name == "Arial"
+
+
+def test_planilha_dcf_sensibilidade_referencia_os_fluxos_da_mediana():
+    from finlab.backend import xlsx_dcf
+
+    blob = xlsx_dcf.planilha("WEGE3", _prem_planilha(),
+                             {"last_year": 2025, "financial": False})
+    wb = _abrir_planilha(blob)
+    assert "Sensibilidade" in wb.sheetnames
+    ws = wb["Sensibilidade"]
+
+    # grade centrada no painel: WACC 16% ± 3 p.p., g 5% ± 2 p.p.
+    assert ws["A4"].value == "WACC \\ g"
+    assert ws["B4"].value == pytest.approx(0.03)
+    assert ws["F4"].value == pytest.approx(0.07)
+    assert ws["A5"].value == pytest.approx(0.13)
+    assert ws["A11"].value == pytest.approx(0.19)
+
+    celula = str(ws["B5"].value)
+    assert celula.startswith('=IF($A5<=B$4,"n/a"')
+    assert "DCF!$C$34/(1+$A5)^1" in celula
+    assert "DCF!$C$38*(1+B$4)/($A5-B$4)/(1+$A5)^5" in celula
+    assert celula.endswith("-DCF!$B$8)/DCF!$B$9)")
+
+
+def test_planilha_dcf_recusa_financeira_e_falta_de_dado():
+    from finlab.backend import xlsx_dcf
+
+    with pytest.raises(xlsx_dcf.SemDados, match="financeira"):
+        xlsx_dcf.planilha("ITUB4", _prem_planilha(), {"financial": True})
+
+    with pytest.raises(xlsx_dcf.SemDados, match="fluxo de caixa"):
+        xlsx_dcf.planilha("XPTO3", _prem_planilha(fcf_media3=None, fcf_ultimo=None),
+                          {"financial": False})
+
+    with pytest.raises(xlsx_dcf.SemDados, match="ações"):
+        xlsx_dcf.planilha("XPTO3", _prem_planilha(shares=None, shares_emitidas=None),
+                          {"financial": False})
+
+    with pytest.raises(xlsx_dcf.SemDados, match="cotação"):
+        xlsx_dcf.planilha("XPTO3", _prem_planilha(preco=None),
+                          {"financial": False})
+
+    # só a média disponível: o último exercício cai para ela, e vice-versa
+    blob = xlsx_dcf.planilha("XPTO3", _prem_planilha(fcf_ultimo=None),
+                             {"financial": False})
+    ws = _abrir_planilha(blob)["DCF"]
+    assert ws["B7"].value == ws["B6"].value == 4800

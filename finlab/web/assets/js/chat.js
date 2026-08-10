@@ -332,10 +332,10 @@
       onclick: (ev) => {
         global.dispatchEvent(new CustomEvent('finlab:aplicar-premissas',
           { detail: p }));
-        ev.target.textContent = '✓ aplicado nos sliders';
+        ev.target.textContent = '✓ premissas aplicadas';
         ev.target.disabled = true;
       }
-    }, '⇩ Aplicar estas premissas no painel');
+    }, '⇩ Adotar estas premissas na conversa');
 
     return h('div', { class: 'chat-proposta' }, [
       h('div', { class: 'tt' },
