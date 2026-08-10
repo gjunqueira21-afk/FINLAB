@@ -371,6 +371,11 @@ def api_company(ticker: str):
         "itr": cvm.latest_quarter(comp.cd_cvm),
         "trimestral": cvm.quarterly_series(comp.cd_cvm),
         "ltm": cvm.ltm_series(comp.cd_cvm),
+        # DRE de leitura: as tabelas da página nova (spec 4.3). Vem montada do
+        # backend porque a montagem é contábil — códigos de conta, D&A da DFC,
+        # desacumulação do ITR —, não formatação.
+        "dre": {"anual": cvm.dre_anual(comp.cd_cvm),
+                "trimestral": cvm.dre_trimestral(comp.cd_cvm)},
         "ipe": ipe.documentos(comp.cd_cvm),
         "docs": docs.stats(comp.cd_cvm),
         "calls": calls.listar(comp.cd_cvm),

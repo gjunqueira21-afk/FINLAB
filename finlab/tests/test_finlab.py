@@ -2843,3 +2843,176 @@ def test_linha_da_tela_principal_traz_epv_lpa_e_nao_cai_com_dado_torto(monkeypat
     caido = bapp._epv_da_linha(fund, snap, {}, None)
     assert caido["epv_por_acao"] is None
     assert caido["lpa"] == pytest.approx(6840.0 / 4196.0, abs=1e-4), "o LPA sobrevive"
+
+
+# ---------------------------------------------------------------------------
+# DRE estruturada (redesenho · spec 4.3)
+# ---------------------------------------------------------------------------
+
+def test_dre_anual_monta_as_linhas_com_margens_e_cagr(tmp_path, monkeypatch):
+    """A DRE de leitura: ordem contábil, margens derivadas da receita, CAGR só
+    onde ele significa alguma coisa, e EBITDA = EBIT + |D&A| (a CVM não
+    publica EBITDA como conta)."""
+    import pandas as pd
+
+    monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
+    cvm.limpar_cache()
+    try:
+        linhas = []
+        for ano, receita, cpv, bruto, desp, ebit, resfin, ir, lucro in [
+            (2024, 1000.0, -600.0, 400.0, -150.0, 250.0, -20.0, -60.0, 170.0),
+            (2025, 1200.0, -700.0, 500.0, -180.0, 320.0, -25.0, -80.0, 215.0),
+        ]:
+            for conta, ds, v in [("3.01", "Receita de Venda de Bens", receita),
+                                 ("3.02", "Custo dos Bens Vendidos", cpv),
+                                 ("3.03", "Resultado Bruto", bruto),
+                                 ("3.04", "Despesas/Receitas Operacionais", desp),
+                                 ("3.05", "Resultado Antes do Resultado Financeiro", ebit),
+                                 ("3.06", "Resultado Financeiro", resfin),
+                                 ("3.08", "Imposto de Renda e Contribuição Social", ir),
+                                 ("3.11", "Lucro/Prejuizo Consolidado do Periodo", lucro)]:
+                linhas.append({"CD_CVM": "009512", "DENOM_CIA": "T", "CNPJ_CIA": "1",
+                               "ANO_REFER": ano, "ORDEM_EXERC": "ÚLTIMO",
+                               "DT_FIM_EXERC": f"{ano}-12-31",
+                               "CD_CONTA": conta, "DS_CONTA": ds, "VL_CONTA_AJUSTADO": v})
+        pd.DataFrame(linhas).to_parquet(tmp_path / "dre_dfp.parquet", index=False)
+        # D&A vive na DFC, como ajuste do FCO
+        pd.DataFrame([
+            {"CD_CVM": "009512", "DENOM_CIA": "T", "CNPJ_CIA": "1", "ANO_REFER": ano,
+             "ORDEM_EXERC": "ÚLTIMO", "DT_FIM_EXERC": f"{ano}-12-31",
+             "CD_CONTA": "6.01.01.02", "DS_CONTA": "Depreciacao e Amortizacao",
+             "VL_CONTA_AJUSTADO": v}
+            for ano, v in [(2024, 50.0), (2025, 60.0)]
+        ]).to_parquet(tmp_path / "dfc_mi_dfp.parquet", index=False)
+        cvm.limpar_cache()
+
+        d = cvm.dre_anual("009512")
+        assert d["anos"] == [2024, 2025] and d["financial"] is False
+        por = {l["chave"]: l for l in d["linhas"]}
+
+        # ordem contábil preservada
+        assert [l["chave"] for l in d["linhas"]][:4] == [
+            "receita", "cpv", "lucro_bruto", "mg_bruta"]
+        assert por["receita"]["valores"] == [1000.0, 1200.0]
+        assert por["cpv"]["tipo"] == "deducao"
+        assert por["lucro_liquido"]["tipo"] == "hero"
+
+        # EBITDA derivado: EBIT + |D&A|
+        assert por["ebitda"]["valores"] == [300.0, 380.0]
+        assert por["da"]["valores"] == [-50.0, -60.0], "D&A entra negativa"
+
+        # margens sobre a receita, na linha própria
+        assert por["mg_bruta"]["valores"] == [pytest.approx(0.4), pytest.approx(0.4167, abs=1e-3)]
+        assert por["mg_ebitda"]["valores"][1] == pytest.approx(380.0 / 1200.0)
+        assert por["mg_liquida"]["tipo"] == "margem"
+
+        # CAGR só nas linhas de resultado; margem e dedução não têm
+        assert por["receita"]["cagr"] == pytest.approx(0.2)
+        assert por["mg_bruta"]["cagr"] is None
+        assert por["cpv"]["cagr"] is None
+    finally:
+        cvm.limpar_cache()
+
+
+def test_dre_anual_de_financeira_cai_no_plano_reduzido(tmp_path, monkeypatch):
+    """Banco não tem CPV nem EBITDA: mostrar as linhas vazias sugeriria que o
+    dado faltou. E linha só de zeros (o IR da consolidada) não entra."""
+    import pandas as pd
+
+    monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
+    cvm.limpar_cache()
+    try:
+        pd.DataFrame([
+            {"CD_CVM": "009512", "DENOM_CIA": "B", "CNPJ_CIA": "1", "ANO_REFER": 2025,
+             "ORDEM_EXERC": "ÚLTIMO", "DT_FIM_EXERC": "2025-12-31",
+             "CD_CONTA": c, "DS_CONTA": ds, "VL_CONTA_AJUSTADO": v}
+            for c, ds, v in [
+                ("3.01", "Receitas da Intermediação Financeira", 500.0),
+                ("3.06", "Resultado Financeiro", -10.0),
+                ("3.08", "Imposto de Renda e Contribuição Social", 0.0),
+                ("3.11", "Lucro/Prejuizo Consolidado do Periodo", 90.0)]
+        ]).to_parquet(tmp_path / "dre_dfp.parquet", index=False)
+        cvm.limpar_cache()
+
+        d = cvm.dre_anual("009512")
+        chaves = [l["chave"] for l in d["linhas"]]
+        assert d["financial"] is True
+        assert "cpv" not in chaves and "ebitda" not in chaves and "da" not in chaves
+        assert "receita" in chaves and "lucro_liquido" in chaves and "mg_liquida" in chaves
+        assert "ir" not in chaves, "linha só de zeros não é informação"
+    finally:
+        cvm.limpar_cache()
+
+
+def test_dre_trimestral_desacumula_soma_o_acumulado_e_compara_com_o_ano_anterior(
+        tmp_path, monkeypatch):
+    """Três invariantes: o ITR vem acumulado e sai isolado; a coluna do
+    semestre é a soma dos trimestres; e o Δ a/a compara o mesmo trimestre —
+    não o anterior, que a sazonalidade distorce."""
+    import pandas as pd
+
+    monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
+    cvm.limpar_cache()
+    try:
+        def linha(ano, mes_fim, acumulado, valor, conta="3.01",
+                  ds="Receita de Venda de Bens"):
+            return {"CD_CVM": "009512", "DENOM_CIA": "T", "CNPJ_CIA": "1",
+                    "ANO_REFER": ano, "ORDEM_EXERC": "ÚLTIMO",
+                    "DT_INI_EXERC": f"{ano}-01-01",
+                    "DT_FIM_EXERC": f"{ano}-{mes_fim}", "CD_CONTA": conta,
+                    "DS_CONTA": ds, "VL_CONTA_AJUSTADO": acumulado if acumulado else valor}
+
+        itr = []
+        for ano, (a1, a2) in [(2024, (100.0, 220.0)), (2025, (120.0, 260.0))]:
+            for conta, ds, fator in [("3.01", "Receita de Venda de Bens", 1.0),
+                                     ("3.11", "Lucro/Prejuizo Consolidado do Periodo", 0.2)]:
+                itr.append(linha(ano, "03-31", a1 * fator, None, conta, ds))
+                itr.append(linha(ano, "06-30", a2 * fator, None, conta, ds))
+        pd.DataFrame(itr).to_parquet(tmp_path / "dre_itr.parquet", index=False)
+        cvm.limpar_cache()
+
+        t = cvm.dre_trimestral("009512")
+        assert t["ano"] == 2025
+        assert [c["rotulo"] for c in t["colunas"]] == ["1T25", "2T25", "1S25"]
+        assert t["colunas"][2]["acumulado"] is True
+
+        receita = next(l for l in t["linhas"] if l["chave"] == "receita")
+        # acumulado 120 e 260 → trimestres isolados 120 e 140
+        assert receita["valores"] == [120.0, 140.0, 260.0]
+        assert receita["valores"][2] == receita["valores"][0] + receita["valores"][1]
+
+        # Δ a/a por índice de trimestre: 1T25/1T24 e 2T25/2T24 (=140/120)
+        assert receita["yoy"][0] == pytest.approx(120.0 / 100.0 - 1)
+        assert receita["yoy"][1] == pytest.approx(140.0 / 120.0 - 1)
+        assert receita["yoy"][2] == pytest.approx(260.0 / 220.0 - 1)
+
+        # margem não tem Δ a/a em pontos percentuais nesta tabela
+        margem = next(l for l in t["linhas"] if l["chave"] == "mg_liquida")
+        assert all(y is None for y in margem["yoy"])
+    finally:
+        cvm.limpar_cache()
+
+
+def test_dre_degrada_sem_dado(tmp_path, monkeypatch):
+    monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
+    cvm.limpar_cache()
+    try:
+        assert cvm.dre_anual("009512")["linhas"] == []
+        assert cvm.dre_trimestral("009512")["colunas"] == []
+        assert cvm.dre_anual("")["anos"] == []
+        assert cvm.dre_trimestral("")["linhas"] == []
+    finally:
+        cvm.limpar_cache()
+
+
+def test_cagr_recusa_sinal_trocado():
+    """Prejuízo virando lucro não tem taxa composta que signifique nada."""
+    # a janela é a distância entre o primeiro e o último valor VÁLIDO —
+    # série que só começa no meio não vira CAGR de 5 anos
+    assert cvm._cagr([100.0, 121.0], 5) == pytest.approx(0.21)
+    assert cvm._cagr([None, None, 100.0, 121.0], 3) == pytest.approx(0.21)
+    assert cvm._cagr([100.0, 110.0, 121.0], 2) == pytest.approx(0.1)
+    assert cvm._cagr([-50.0, 121.0], 1) is None
+    assert cvm._cagr([100.0, -20.0], 1) is None
+    assert cvm._cagr([None, 100.0], 1) is None
+    assert cvm._cagr([], 5) is None
