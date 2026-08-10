@@ -1008,26 +1008,63 @@ def contexto_lista_acoes(overview: dict, macro: dict, setores: dict) -> str:
         f"{len(rows)} ações do painel, ordenadas da melhor para a pior "
         "saúde financeira (nota 0-100 construída das demonstrações anuais da CVM).",
         "Múltiplos calculados com o preço recente sobre o último exercício fechado "
-        "na CVM. Bancos/seguradoras não têm DL/EBITDA (n/a).",
-        "Use estes dados para perguntas sobre o conjunto — comparações, filtros, "
-        "montagem de carteira — citando sempre os números que sustentam a escolha.",
+        "na CVM. Bancos/seguradoras não têm DL/EBITDA nem EPV (n/a).",
         "",
-        "AÇÕES (nº · ticker · setor · nota · preço · 12 meses · YTD · P/L · P/VP "
-        "· DY · ROE · DL/EBITDA)",
+        "VOCÊ TEM O PAINEL INTEIRO AQUI. Cada linha traz o dossiê resumido de uma "
+        "empresa — preço, valor por poder de lucro, múltiplos, porte e qualidade. "
+        "Perguntas de garimpo (\"as 5 mais perto do EPV\", \"quem tem ROIC acima de "
+        "15% e P/L abaixo de 10\", \"as mais baratas do setor X\") você responde "
+        "ORDENANDO E FILTRANDO ESTA LISTA — não peça para abrir empresa por empresa, "
+        "e não diga que precisa de mais dados quando eles estão abaixo.",
+        "Ao responder um garimpo: mostre a lista pedida com os números que a "
+        "sustentam, na ordem do critério, e diga qual critério usou.",
+        "",
+        "LEGENDA DA LINHA",
+        "  EPV = valor por ação pelo poder de lucro (EBIT normalizado após imposto / "
+        "WACC, menos dívida líquida). É quanto a empresa vale PARADA, sem crescimento.",
+        "  dist = distância do EPV para o preço de tela. Negativa = o preço está "
+        "ACIMA do poder de lucro (o mercado paga por crescimento futuro); positiva = "
+        "o preço está abaixo. \"Perto do EPV\" é |dist| pequena.",
+        "  LPA = lucro por ação do último exercício.",
+        "",
+        "AÇÕES · nº. TICKER (setor) nota | preço | EPV e dist | 12m · YTD | "
+        "P/L · P/VP · EV/EBITDA · DY · ROE · ROIC · DL/EBITDA | mg EBITDA · mg líq | "
+        "CAGR receita/lucro 3a | receita · lucro · mkt cap",
     ]
     for r in rows:
         m = r.get("multiples") or {}
         perf = r.get("perf") or {}
+        val = r.get("valor") or {}
+        porte = r.get("porte") or {}
+        qual = r.get("qualidade") or {}
         setor = (setores.get(r.get("sector")) or {}).get("label") or r.get("sector") or "?"
         preco = r.get("price")
+        fin = r.get("financial")
+
+        epv = val.get("epv_por_acao")
+        dist = val.get("epv_upside")
+        bloco_epv = ("n/a (financeira)" if fin else
+                     f"EPV R$ {_f_num(epv, 2)} (dist {_f_pct(dist)})" if epv is not None
+                     else "EPV sem dado")
+
         linhas.append(
             f"{r.get('rank')}. {r.get('ticker')} ({setor}) nota {_f_num(r.get('score'))} | "
             f"{'R$ ' + _f_num(preco, 2) if preco is not None else 'sem cotação'} | "
-            f"12m {_f_pct(perf.get('m12'))} | YTD {_f_pct(perf.get('ytd'))} | "
-            f"P/L {_f_x(m.get('pl'))} | P/VP {_f_x(m.get('pvp'))} | "
-            f"DY {_f_pct(m.get('dy')) if m.get('dy') is not None else 'n/a'} | "
-            f"ROE {_f_pct(m.get('roe')) if m.get('roe') is not None else 'n/a'} | "
-            f"DL/EBITDA {'n/a' if r.get('financial') else _f_x(m.get('nd_ebitda'))}"
+            f"{bloco_epv} | LPA {_f_num(val.get('lpa'), 2)} | "
+            f"12m {_f_pct(perf.get('m12'))} · YTD {_f_pct(perf.get('ytd'))} | "
+            f"P/L {_f_x(m.get('pl'))} · P/VP {_f_x(m.get('pvp'))} · "
+            f"EV/EBITDA {'n/a' if fin else _f_x(m.get('ev_ebitda'))} · "
+            f"DY {_f_pct(m.get('dy')) if m.get('dy') is not None else 'n/a'} · "
+            f"ROE {_f_pct(m.get('roe')) if m.get('roe') is not None else 'n/a'} · "
+            f"ROIC {_f_pct(qual.get('roic')) if qual.get('roic') is not None else 'n/a'} · "
+            f"DL/EBITDA {'n/a' if fin else _f_x(m.get('nd_ebitda'))} | "
+            f"mg EBITDA {_f_pct(qual.get('mg_ebitda')) if qual.get('mg_ebitda') is not None else 'n/a'} · "
+            f"mg líq {_f_pct(qual.get('mg_liquida')) if qual.get('mg_liquida') is not None else 'n/a'} | "
+            f"CAGR rec {_f_pct(qual.get('cagr_receita_3a')) if qual.get('cagr_receita_3a') is not None else 'n/a'} · "
+            f"lucro {_f_pct(qual.get('cagr_lucro_3a')) if qual.get('cagr_lucro_3a') is not None else 'n/a'} | "
+            f"receita {_bi_simples(porte.get('receita'))} · "
+            f"lucro {_bi_simples(porte.get('lucro_liquido'))} · "
+            f"mkt cap {_bi_simples(r.get('market_cap'))}"
         )
 
     stats = overview.get("sector_stats") or {}

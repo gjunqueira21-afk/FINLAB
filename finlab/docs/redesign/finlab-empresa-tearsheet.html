@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WEGE3 · Tear sheet · Gab's FinLab</title>
+<style>
+/* ==========================================================================
+   Proposta v2 — a página vira um TEAR SHEET de leitura.
+   Sem valuation interativo: quem simula é a planilha exportada; a página
+   recebe de volta só a faixa (pessimista · mediana · otimista) no football.
+   ========================================================================== */
+:root {
+  --ink: #070B14; --ink2: #0A1120;
+  --panel: #0E1524; --panel2: #131C2E; --panel3: #18233A;
+  --line: rgba(126,150,190,.16); --line2: rgba(126,150,190,.30);
+  --paper: #E6ECF5; --dim: #7C8DAA; --dim2: #5A6B87;
+  --brand: #67E8F9; --brand2: #A78BFA;
+  --amber: #F5B841; --green: #34D399; --red: #F87171; --blue: #60A5FA;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --r-sm: 8px; --r: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--ink); color: var(--paper);
+  font-family: var(--sans); font-size: 15px; line-height: 1.5;
+  background-image:
+    radial-gradient(1100px 520px at 78% -8%, rgba(103,232,249,.07), transparent 62%),
+    radial-gradient(900px 420px at 8% 0%, rgba(167,139,250,.06), transparent 60%);
+  background-attachment: fixed; min-height: 100vh;
+}
+a { color: var(--brand); text-decoration: none; }
+[hidden] { display: none !important; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 14px 20px 80px; }
+.num, td, th, .ms .v { font-variant-numeric: tabular-nums; }
+
+.mocknote {
+  font: 500 11px/1.5 var(--mono); color: var(--dim);
+  border: 1px dashed var(--line2); border-radius: var(--r-sm);
+  padding: 7px 12px; margin-bottom: 14px; background: rgba(103,232,249,.04);
+}
+.mocknote b { color: var(--brand); }
+.topbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 6px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 14px;
+}
+.brandname {
+  font: 800 18px/1 var(--sans); letter-spacing: -.015em;
+  background: linear-gradient(92deg, var(--brand) 0%, #C4B5FD 55%, var(--brand2) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.topbar .sp { flex: 1 1 auto; }
+.btn {
+  font: 600 12.5px var(--sans); color: var(--dim); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 8px 15px; cursor: pointer;
+  min-height: 34px;
+}
+.btn:hover { border-color: var(--brand); color: var(--brand); }
+.btn.primary {
+  color: var(--brand); border-color: rgba(103,232,249,.45); background: rgba(103,232,249,.10);
+  font-weight: 700;
+}
+.btn:focus-visible, input:focus-visible, button:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--ink2) 100%);
+  border: 1px solid var(--line); border-radius: var(--r);
+  padding: 16px 18px; margin-bottom: 14px;
+}
+.panel-h { margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.ptitle { font: 400 13px/1.4 var(--sans); color: var(--dim); }
+.ptitle b { font-weight: 700; font-size: 14.5px; color: var(--paper); }
+.psub { font: 400 10.5px var(--mono); color: var(--dim2); margin-top: 3px; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font: 500 10px var(--mono); color: var(--dim); align-items: center; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+/* ------------------------------------------------------------------- strip */
+.strip { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 13px 18px; }
+.strip .tk { font: 800 27px/1 var(--sans); letter-spacing: -.02em; }
+.strip .nm { font: 500 13.5px/1.3 var(--sans); color: var(--dim); }
+.strip .meta { font: 400 10.5px var(--mono); color: var(--dim2); margin-top: 6px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 700 11px/1 var(--mono); border-radius: 999px; padding: 5px 10px;
+  border: 1px solid var(--line2); cursor: pointer; background: transparent; color: var(--paper);
+}
+.badge .g { font-weight: 500; color: var(--dim); letter-spacing: .04em; }
+.badge.saude { color: var(--green); border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.07); }
+.badge.regime { color: var(--blue); border-color: rgba(96,165,250,.4); background: rgba(96,165,250,.07); }
+.badge.regime:hover { border-color: var(--blue); }
+.ministats { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-end; margin-left: auto; }
+.ms .l { font: 700 9px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--dim2); }
+.ms .v { font: 700 16.5px/1.2 var(--mono); margin-top: 3px; }
+.ms .s { font: 400 9.5px/1.4 var(--mono); color: var(--dim2); margin-top: 2px; }
+.pos { color: var(--green); } .neg { color: var(--red); } .acc { color: var(--amber); }
+
+/* ----------------------------------------------------- quanto vale / DCF */
+.valgrid { display: grid; gap: 18px; }
+@media (min-width: 980px) { .valgrid { grid-template-columns: 1fr 320px; align-items: start; } }
+.chartbox svg { display: block; width: 100%; height: auto; }
+.dcfcard {
+  border: 1px solid var(--line2); border-radius: var(--r);
+  background: linear-gradient(180deg, var(--panel2) 0%, var(--panel) 100%);
+  padding: 14px 15px;
+}
+.dcfcard h3 {
+  font: 700 10px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 4px;
+}
+.dcfcard .why { font: 400 11px/1.55 var(--sans); color: var(--dim); margin-bottom: 12px; }
+.dcfcard .why b { color: var(--paper); }
+.frow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.fld .l { font: 700 8.5px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim2); margin-bottom: 4px; }
+.fld input {
+  width: 100%; min-height: 36px; padding: 7px 9px;
+  font: 700 13px var(--mono); color: var(--paper);
+  background: var(--ink2); border: 1px solid var(--line2); border-radius: var(--r-sm);
+}
+.fld input::placeholder { color: var(--dim2); font-weight: 500; }
+.fld.med input { border-color: rgba(103,232,249,.5); }
+.dcfmsg { font: 400 10px/1.5 var(--mono); color: var(--dim2); margin-top: 9px; }
+.dcfmsg.err { color: var(--amber); }
+.dcfbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.exportline { border-top: 1px dashed var(--line); margin-top: 13px; padding-top: 12px; }
+
+/* ------------------------------------------------------------------ tabelas */
+table { width: 100%; border-collapse: collapse; font: 400 12.5px var(--mono); }
+th {
+  font: 700 9px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--dim2); text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line2);
+  white-space: nowrap;
+}
+th.left, td.left { text-align: left; }
+td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+tr.mg td { color: var(--dim2); font-size: 10.5px; padding-top: 0; border-bottom-style: dashed; }
+tr.tot td { border-top: 1px solid var(--line2); font-weight: 700; }
+tr.hero td { background: rgba(103,232,249,.05); }
+tr.hero td.left { color: var(--brand); font-weight: 700; }
+td .dl { display: block; font: 500 9.5px/1.3 var(--mono); margin-top: 1px; }
+.table-wrap { overflow-x: auto; }
+.colcagr { color: var(--brand2); }
+
+/* -------------------------------------------------------------------- tabs */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 14px; border-bottom: 1px solid var(--line); }
+.tab {
+  font: 600 12.5px var(--sans); color: var(--dim); background: none; border: none;
+  border-bottom: 2px solid transparent; padding: 9px 13px 10px; cursor: pointer; min-height: 40px;
+}
+.tab:hover { color: var(--paper); }
+.tab.on { color: var(--brand); border-bottom-color: var(--brand); }
+.tab .n {
+  font: 700 8.5px/1 var(--mono); color: var(--amber);
+  border: 1px solid rgba(245,184,65,.4); border-radius: 999px; padding: 2px 6px; margin-left: 6px;
+}
+.regime-h { font: 700 9.5px/1.4 var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--dim2); margin: 14px 0 7px; }
+.regime-txt { font: 400 12.5px/1.65 var(--sans); }
+.regime-cols { display: grid; gap: 18px; }
+@media (min-width: 860px) { .regime-cols { grid-template-columns: 1fr 1fr; } }
+.evid { list-style: none; }
+.evid li { display: flex; gap: 10px; align-items: baseline; font: 400 12px/1.7 var(--sans); padding: 3px 0; }
+.evid .ano { font: 700 10.5px var(--mono); color: var(--brand); flex: none; }
+.evid .cat { font: 600 10px var(--mono); color: var(--dim); flex: none; min-width: 138px; }
+.note { font: 400 11px/1.65 var(--mono); color: var(--dim); border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 12px; }
+.note b { color: var(--paper); }
+.pilar { margin-bottom: 10px; }
+.pilar .row { display: flex; justify-content: space-between; font: 600 11.5px var(--mono); margin-bottom: 4px; }
+.pilar .bar { height: 6px; border-radius: 4px; background: var(--panel3); overflow: hidden; }
+.pilar .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--brand), var(--brand2)); }
+.prom { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 13px; margin-bottom: 9px; }
+.prom .topo { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font: 600 10px var(--mono); }
+.prom .estado { border-radius: 999px; padding: 2px 9px; border: 1px solid; }
+.prom .estado.aberta { color: var(--blue); border-color: rgba(96,165,250,.4); }
+.prom .estado.cumprida { color: var(--green); border-color: rgba(52,211,153,.4); }
+.prom .texto { font: 400 12.5px/1.5 var(--sans); margin-top: 6px; }
+.prom .prazo { color: var(--dim2); }
+.dropzone {
+  border: 1.5px dashed rgba(103,232,249,.4); border-radius: var(--r-sm);
+  padding: 13px 16px; font: 400 12px/1.5 var(--sans); color: var(--dim);
+  cursor: pointer; margin-bottom: 10px; background: rgba(103,232,249,.03);
+}
+.dropzone b { color: var(--brand); }
+.dropzone:hover { border-color: var(--brand); }
+.slots { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.slot {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  font: 600 11px var(--mono); color: var(--dim); background: var(--ink2);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 12px;
+  cursor: pointer; min-height: 44px;
+}
+.slot .q { font: 700 12.5px var(--mono); color: var(--paper); display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.pos { background: var(--green); box-shadow: 0 0 5px rgba(52,211,153,.7); }
+.dot.neu { background: var(--amber); box-shadow: 0 0 5px rgba(245,184,65,.7); }
+.dot.pes { background: var(--red); box-shadow: 0 0 5px rgba(248,113,113,.7); }
+.slot .d { font: 500 9px var(--mono); color: var(--dim2); }
+.slot.on { border-color: rgba(103,232,249,.55); background: rgba(103,232,249,.07); }
+.slot.on .q { color: var(--brand); }
+.slotnote { font: 400 9.5px var(--mono); color: var(--dim2); }
+.arquivo {
+  font: 500 10.5px/1.7 var(--mono); color: var(--dim);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--ink2); padding: 7px 12px; margin-bottom: 8px;
+  display: flex; gap: 7px; flex-wrap: wrap; align-items: center;
+}
+.arquivo b { color: var(--paper); }
+.arqitem { display: inline-flex; align-items: center; gap: 5px; font: 600 10px var(--mono); color: var(--dim);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; margin-right: 5px; }
+.callhead { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.nota-call {
+  font: 700 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  border-radius: 999px; padding: 6px 12px; border: 1px solid;
+}
+.nota-call.pos { color: var(--green); border-color: rgba(52,211,153,.45); background: rgba(52,211,153,.08); }
+.nota-call.neu { color: var(--amber); border-color: rgba(245,184,65,.45); background: rgba(245,184,65,.08); }
+.nota-call.pes { color: var(--red); border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.08); }
+.trecho { font: 600 9.5px var(--mono); }
+.foot { font: 400 11px/1.7 var(--mono); color: var(--dim2); border-top: 1px solid var(--line); padding-top: 16px; margin-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  .btn, .tab, .fld input { transition: border-color .15s, color .15s, background .15s; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="mocknote"><b>PROPOSTA v2 · tear sheet.</b> Sem valuation interativo na página: os dados
+  saem para a <b>planilha DCF</b> (botão no cartão à direita), você simula lá, e traz de volta só a
+  <b>faixa pessimista · mediana · otimista</b> — que entra no campo de futebol. Preencha e veja.</div>
+
+  <header class="topbar">
+    <span class="brandname">🧠 Gab's FinLab</span>
+    <span class="sp"></span>
+    <button class="btn">🔎 Trocar de empresa…</button>
+    <button class="btn">← Tela principal</button>
+    <button class="btn">⚙ A mesa de IA</button>
+  </header>
+
+  <!-- 1 ▸ IDENTIDADE -->
+  <section class="panel strip">
+    <div>
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <span class="tk">WEGE3</span>
+        <span class="nm">WEG S.A.</span>
+        <span class="badge saude">88 <span class="g">saúde</span></span>
+        <button class="badge regime" onclick="irParaAba('contexto')" title="Abrir o dossiê do regime">R0 · operação normal <span class="g">▸</span></button>
+      </div>
+      <div class="meta">Bens de capital · CVM 5410 · exercício-base 2025 · último ITR 2T26 (30/06/2026)</div>
+    </div>
+    <div class="ministats">
+      <div class="ms"><div class="l">Cotação</div><div class="v">R$ 41,20</div><div class="s">BRAPI · hoje</div></div>
+      <div class="ms"><div class="l">Dia</div><div class="v pos">+0,8%</div><div class="s">último pregão</div></div>
+      <div class="ms"><div class="l">12 meses</div><div class="v pos">+14,3%</div><div class="s">retorno</div></div>
+      <div class="ms"><div class="l">Valor de mercado</div><div class="v">R$ 172,9 bi</div><div class="s">preço × ações</div></div>
+      <div class="ms"><div class="l">P/L</div><div class="v">25,4×</div><div class="s">exercício-base</div></div>
+      <div class="ms"><div class="l">Dív.Líq/EBITDA</div><div class="v acc">−0,34×</div><div class="s">caixa líquido</div></div>
+    </div>
+  </section>
+
+  <!-- 2 ▸ QUANTO VALE: football field + a faixa do SEU DCF, vinda da planilha -->
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <div class="ptitle"><b>Quanto vale, afinal</b> · referências de mercado no mesmo eixo — o valuation é seu</div>
+        <div class="psub">a linha tracejada é o preço de tela · a página não calcula preço justo: você simula na planilha e traz a faixa</div>
+      </div>
+    </div>
+    <div class="valgrid">
+      <div class="chartbox" id="chartField"></div>
+      <div class="dcfcard">
+        <h3>Seu DCF · faixa da planilha</h3>
+        <div class="why">Exporte o modelo com os dados da CVM já preenchidos, simule no Excel e traga os <b>três preços justos</b> de volta.</div>
+        <div class="frow">
+          <div class="fld"><div class="l">Pessimista</div><input id="inBear" inputmode="decimal" placeholder="9,67" aria-label="Preço justo pessimista"></div>
+          <div class="fld med"><div class="l">Mediana</div><input id="inBase" inputmode="decimal" placeholder="13,63" aria-label="Preço justo mediana"></div>
+          <div class="fld"><div class="l">Otimista</div><input id="inBull" inputmode="decimal" placeholder="18,47" aria-label="Preço justo otimista"></div>
+        </div>
+        <div class="dcfbtns">
+          <button class="btn primary" onclick="aplicarDcf()">Mostrar no gráfico</button>
+          <button class="btn" onclick="limparDcf()">Limpar</button>
+        </div>
+        <div class="dcfmsg" id="dcfMsg">Fica guardado por ticker, com a data da simulação.</div>
+        <div class="exportline">
+          <button class="btn" style="width:100%" onclick="exportarDcf()">⬇ Exportar planilha DCF (WEGE3)</button>
+          <div class="dcfmsg">FCL, dívida líquida, ações e preço já preenchidos · premissas em 3 cenários · fórmulas vivas e matriz de sensibilidade.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 ▸ DRE ANUAL -->
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <div class="ptitle"><b>DRE · exercícios anuais</b> · demonstrações da CVM, em R$ milhões</div>
+        <div class="psub">margens em cinza sob cada resultado · CAGR de 5 anos na última coluna</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th class="left">R$ mi</th><th>2020</th><th>2021</th><th>2022</th><th>2023</th><th>2024</th><th>2025</th><th class="colcagr">CAGR 5a</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="left">Receita líquida</td><td>17.470</td><td>23.563</td><td>29.905</td><td>32.504</td><td>36.379</td><td>40.180</td><td class="colcagr">+18,1%</td></tr>
+          <tr><td class="left">(−) CPV</td><td>(12.440)</td><td>(16.923)</td><td>(21.455)</td><td>(22.784)</td><td>(25.229)</td><td>(27.700)</td><td class="colcagr">+17,4%</td></tr>
+          <tr class="tot"><td class="left">Lucro bruto</td><td>5.030</td><td>6.640</td><td>8.450</td><td>9.720</td><td>11.150</td><td>12.480</td><td class="colcagr">+19,9%</td></tr>
+          <tr class="mg"><td class="left">margem bruta</td><td>28,8%</td><td>28,2%</td><td>28,3%</td><td>29,9%</td><td>30,7%</td><td>31,1%</td><td></td></tr>
+          <tr><td class="left">(−) Despesas operacionais</td><td>(1.535)</td><td>(2.165)</td><td>(2.860)</td><td>(2.580)</td><td>(3.040)</td><td>(3.270)</td><td class="colcagr">+16,3%</td></tr>
+          <tr class="tot"><td class="left">EBITDA</td><td>3.495</td><td>4.475</td><td>5.590</td><td>7.140</td><td>8.110</td><td>9.210</td><td class="colcagr">+21,4%</td></tr>
+          <tr class="mg"><td class="left">margem EBITDA</td><td>20,0%</td><td>19,0%</td><td>18,7%</td><td>22,0%</td><td>22,3%</td><td>22,9%</td><td></td></tr>
+          <tr><td class="left">(−) D&amp;A</td><td>(440)</td><td>(520)</td><td>(640)</td><td>(760)</td><td>(870)</td><td>(980)</td><td></td></tr>
+          <tr class="tot"><td class="left">EBIT</td><td>3.055</td><td>3.955</td><td>4.950</td><td>6.380</td><td>7.240</td><td>8.230</td><td class="colcagr">+21,9%</td></tr>
+          <tr><td class="left">Resultado financeiro</td><td>180</td><td>90</td><td>310</td><td>420</td><td>350</td><td>390</td><td></td></tr>
+          <tr><td class="left">(−) IR / CSLL</td><td>(895)</td><td>(459)</td><td>(1.051)</td><td>(1.120)</td><td>(1.490)</td><td>(1.780)</td><td></td></tr>
+          <tr class="tot hero"><td class="left">Lucro líquido</td><td>2.340</td><td>3.586</td><td>4.209</td><td>5.680</td><td>6.100</td><td>6.840</td><td class="colcagr">+23,9%</td></tr>
+          <tr class="mg"><td class="left">margem líquida</td><td>13,4%</td><td>15,2%</td><td>14,1%</td><td>17,5%</td><td>16,8%</td><td>17,0%</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 4 ▸ DRE TRIMESTRAL DO ANO CORRENTE -->
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <div class="ptitle"><b>2026 por trimestre</b> · ITR desacumulado, em R$ milhões</div>
+        <div class="psub">variação contra o mesmo trimestre do ano anterior, sob cada valor</div>
+      </div>
+      <div class="legend"><span><i style="background:var(--green)"></i>Δ a/a positivo</span><span><i style="background:var(--red)"></i>Δ a/a negativo</span></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th class="left">R$ mi</th><th>1T26</th><th>2T26</th><th>1S26</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="left">Receita líquida</td>
+            <td>10.420<span class="dl pos">+11,2% a/a</span></td>
+            <td>11.080<span class="dl pos">+12,1% a/a</span></td>
+            <td>21.500<span class="dl pos">+11,7% a/a</span></td></tr>
+          <tr><td class="left">Lucro bruto</td>
+            <td>3.230<span class="dl pos">+13,0% a/a</span></td>
+            <td>3.470<span class="dl pos">+13,8% a/a</span></td>
+            <td>6.700<span class="dl pos">+13,4% a/a</span></td></tr>
+          <tr><td class="left">EBITDA</td>
+            <td>2.355<span class="dl pos">+14,0% a/a</span></td>
+            <td>2.550<span class="dl pos">+15,2% a/a</span></td>
+            <td>4.905<span class="dl pos">+14,6% a/a</span></td></tr>
+          <tr class="mg"><td class="left">margem EBITDA</td><td>22,6%</td><td>23,0%</td><td>22,8%</td></tr>
+          <tr><td class="left">EBIT</td>
+            <td>2.100<span class="dl pos">+14,8% a/a</span></td>
+            <td>2.290<span class="dl pos">+15,7% a/a</span></td>
+            <td>4.390<span class="dl pos">+15,3% a/a</span></td></tr>
+          <tr class="tot hero"><td class="left">Lucro líquido</td>
+            <td>1.720<span class="dl pos">+12,4% a/a</span></td>
+            <td>1.865<span class="dl pos">+13,7% a/a</span></td>
+            <td>3.585<span class="dl pos">+13,1% a/a</span></td></tr>
+          <tr class="mg"><td class="left">margem líquida</td><td>16,5%</td><td>16,8%</td><td>16,7%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note"><b>Trimestres isolados, não acumulados.</b> O ITR da CVM vem acumulado no ano; o painel desacumula para você comparar trimestre contra trimestre. O LTM completo continua na aba de fundamentos.</div>
+  </section>
+
+  <!-- 5 ▸ MÚLTIPLOS vs PARES -->
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <div class="ptitle"><b>Múltiplos contra os pares</b> · bens de capital, último exercício fechado</div>
+        <div class="psub">a linha de prêmio/desconto compara com a mediana dos pares — o resto da tabela explica o porquê</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th class="left">Empresa</th><th>P/L</th><th>EV/EBITDA</th><th>P/VP</th><th>ROE</th><th>Mg EBITDA</th><th>Dív.Líq/EBITDA</th><th>Saúde</th>
+        </tr></thead>
+        <tbody>
+          <tr class="hero"><td class="left">WEGE3</td><td>25,4×</td><td>18,4×</td><td>8,9×</td><td>32,4%</td><td>22,9%</td><td class="acc">−0,34×</td><td class="pos">88</td></tr>
+          <tr><td class="left">Par A</td><td>11,2×</td><td>6,9×</td><td>1,9×</td><td>17,8%</td><td>17,4%</td><td>0,8×</td><td>71</td></tr>
+          <tr><td class="left">Par B</td><td>9,8×</td><td>5,4×</td><td>1,3×</td><td>13,5%</td><td>14,1%</td><td>1,4×</td><td>64</td></tr>
+          <tr><td class="left">Par C</td><td>13,6×</td><td>7,7×</td><td>2,2×</td><td>16,9%</td><td>19,0%</td><td>0,6×</td><td>69</td></tr>
+          <tr class="tot"><td class="left">Mediana dos pares</td><td>11,2×</td><td>6,9×</td><td>1,9×</td><td>16,9%</td><td>17,4%</td><td>0,8×</td><td>69</td></tr>
+          <tr><td class="left" style="color:var(--brand2);font-weight:700">WEGE3 vs mediana</td>
+            <td class="acc">+127%</td><td class="acc">+167%</td><td class="acc">+368%</td>
+            <td class="pos">+15,5 pp</td><td class="pos">+5,5 pp</td><td class="pos">caixa líq.</td><td class="pos">+19</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note"><b>O prêmio se justifica?</b> É exatamente a pergunta que a planilha DCF responde: quanto de crescimento o preço de hoje exige. As colunas de ROE, margem e saúde mostram o que sustenta o múltiplo — a simulação diz se é suficiente.</div>
+  </section>
+
+  <!-- 6 ▸ CAMADAS DE ESTUDO -->
+  <div class="tabs" role="tablist">
+    <button class="tab on" data-tab="saude" onclick="abrirAba('saude')">Nota de saúde</button>
+    <button class="tab" data-tab="contexto" onclick="abrirAba('contexto')">Contexto &amp; calls</button>
+  </div>
+
+  <section class="panel" data-panel="saude">
+    <div class="panel-h"><div>
+      <div class="ptitle"><b>Nota de saúde 88 / 100</b> · pilares sobre as demonstrações anuais</div>
+      <div class="psub">pesos fixos e curvas de pontuação abertas</div>
+    </div></div>
+    <div class="pilar"><div class="row"><span>Rentabilidade</span><span>95</span></div><div class="bar"><i style="width:95%"></i></div></div>
+    <div class="pilar"><div class="row"><span>Alavancagem</span><span>100</span></div><div class="bar"><i style="width:100%"></i></div></div>
+    <div class="pilar"><div class="row"><span>Crescimento</span><span>92</span></div><div class="bar"><i style="width:92%"></i></div></div>
+    <div class="pilar"><div class="row"><span>Margem</span><span>90</span></div><div class="bar"><i style="width:90%"></i></div></div>
+    <div class="pilar"><div class="row"><span>Geração de caixa</span><span>78</span></div><div class="bar"><i style="width:78%"></i></div></div>
+    <div class="pilar"><div class="row"><span>Consistência</span><span>85</span></div><div class="bar"><i style="width:85%"></i></div></div>
+  </section>
+
+  <section class="panel" data-panel="contexto" hidden>
+    <div class="panel-h">
+      <div>
+        <div class="ptitle"><b>Contexto da gestão</b> · calls e regime num lugar só</div>
+        <div class="psub">suba a transcrição — o agente resume e dá a nota; a leitura final é sua</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <span class="badge regime" style="cursor:default">R0 · operação normal</span>
+        <span style="font:600 10.5px var(--mono);color:var(--dim)">a média de 3 anos segue válida como base</span>
+      </div>
+    </div>
+
+    <!-- upload + slots das últimas 3 calls -->
+    <div class="dropzone" onclick="uploadCall()" role="button" tabindex="0"
+         onkeydown="if(event.key==='Enter')uploadCall()">
+      <b>Solte aqui a transcrição da call</b> · txt, pdf ou vtt — de onde veio é escolha sua: ASR local, serviço pago ou o site de RI
+    </div>
+    <div class="slots" id="slots">
+      <button class="slot on" data-call="2T26" onclick="trocarCall('2T26')">
+        <span class="q"><i class="dot pos"></i>2T26</span><span class="d">07/08/26 · analisada ✓</span>
+      </button>
+      <button class="slot" data-call="1T26" onclick="trocarCall('1T26')">
+        <span class="q"><i class="dot pos"></i>1T26</span><span class="d">08/05/26 · analisada ✓</span>
+      </button>
+      <button class="slot" data-call="4T25" onclick="trocarCall('4T25')">
+        <span class="q"><i class="dot neu"></i>4T25</span><span class="d">27/02/26 · analisada ✓</span>
+      </button>
+      <span class="slotnote">a tela mostra as últimas 3 · a cor é a nota de cada call</span>
+    </div>
+    <div class="arquivo">📄 <b>WEGE3-calls.md</b> · histórico completo, nada se apaga — <span id="arqCount">5</span> calls · fora da tela: <span id="arqLista"><span class="arqitem"><i class="dot pos"></i>3T25</span><span class="arqitem"><i class="dot neu"></i>2T25</span></span> · a mesa de IA consulta o arquivo inteiro · <a href="#" class="trecho">abrir ↗</a></div>
+
+    <div class="callhead">
+      <div class="regime-h" style="margin:0" id="callTitulo">Resumo da call · pelo agente de contexto</div>
+      <span class="nota-call pos" id="callNota">—</span>
+    </div>
+    <div class="regime-txt" style="margin-top:9px" id="callTexto"></div>
+
+    <div class="regime-h">O que a empresa comunicou à CVM</div>
+    <ul class="evid">
+      <li><span class="ano">02/07/26</span><span class="cat">Fato Relevante</span><a href="#">aquisição de operação industrial no exterior ↗</a></li>
+      <li><span class="ano">14/05/26</span><span class="cat">Comunicado ao Mercado</span><a href="#">plano de investimentos do exercício ↗</a></li>
+    </ul>
+
+    <div class="note"><b>O agente lê só o que você enviou — e mostra de onde tirou.</b> Cada
+    afirmação aponta o trecho de origem na transcrição, e a nota (positiva · neutra · pessimista) é a
+    leitura do agente sobre esta call — não é recomendação. As calls antigas saem da tela, nunca do
+    arquivo: <b>WEGE3-calls.md</b> guarda todas, e a mesa de IA cita cada uma por data e doc ID —
+    o passado inteiro continua consultável.</div>
+  </section>
+
+
+  <div class="foot">
+    <b>O que mudou na v2.</b> 1 · O valuation interativo saiu da página: a simulação vive numa
+    planilha exportada com os dados da CVM pré-preenchidos, fórmulas vivas e três cenários — o painel
+    mostra dados, você modela onde sempre modelou. 2 · O campo de futebol ganhou a linha
+    <b>Seu DCF</b>: pessimista, mediana e otimista digitados de volta, guardados por ticker. 3 · O
+    corpo da página virou leitura pura: DRE anual, trimestres do ano corrente com Δ a/a, e múltiplos
+    contra os pares com a linha de prêmio/desconto. 4 · Regime e calls se fundiram em <b>Contexto &amp; calls</b>: você sobe a transcrição das últimas 3 calls e o agente devolve um texto único — o que foi entregue, o que ficou devendo e a principal preocupação dos analistas — com uma nota: positiva, neutra ou pessimista. A tela mostra 3; o histórico completo vive num arquivo Markdown que os agentes consultam inteiro.
+    <br><br><b>Isto não é recomendação de investimento.</b> Números ilustrativos sobre dados públicos.
+  </div>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+var PRECO = 41.20;
+var meuDcf = null; // { bear, base, bull }
+
+function el(id) { return document.getElementById(id); }
+function money(v) { return 'R$ ' + v.toFixed(2).replace('.', ','); }
+function lerNum(id) {
+  var raw = (el(id).value || '').trim().replace(/\./g, '').replace(',', '.');
+  var v = parseFloat(raw);
+  return isFinite(v) && v > 0 ? v : NaN;
+}
+
+/* ------------------------------------------------------- football field */
+var NS = 'http://www.w3.org/2000/svg';
+function svg(tag, at) {
+  var e = document.createElementNS(NS, tag);
+  for (var k in at) e.setAttribute(k, at[k]);
+  return e;
+}
+function txt(x, y, s, at) {
+  var e = svg('text', Object.assign({ x: x, y: y,
+    'font-family': 'ui-monospace,Menlo,Consolas,monospace' }, at || {}));
+  e.textContent = s;
+  return e;
+}
+
+function renderField() {
+  var itens = [];
+  if (meuDcf) {
+    itens.push({ nome: 'Seu DCF · da planilha', a: meuDcf.bear, b: meuDcf.bull,
+                 ponto: meuDcf.base, cor: '#67E8F9', forte: true });
+  } else {
+    itens.push({ nome: 'Seu DCF · da planilha', vazio: true, cor: '#67E8F9' });
+  }
+  itens.push({ nome: 'Consenso de analistas', a: 44.0, b: 52.0, ponto: 48.0, cor: '#60A5FA' });
+  itens.push({ nome: 'P/L dos pares × LPA', a: 15.9, b: 22.0, cor: '#A78BFA' });
+  itens.push({ nome: 'Faixa de 52 semanas', a: 33.10, b: 44.85, cor: '#7C8DAA' });
+
+  var vals = [PRECO];
+  itens.forEach(function (i) {
+    if (!i.vazio) { vals.push(i.a); vals.push(i.b); }
+  });
+  var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+  var pad = (max - min) * 0.10 || 5; min -= pad; max += pad;
+
+  var W = 860, H = 190, L = 215, R = 850, T = 16, rowH = 38;
+  function X(v) { return L + (v - min) / (max - min) * (R - L); }
+  var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img',
+    'aria-label': 'Faixas de valor por método contra o preço de tela' });
+
+  itens.forEach(function (it, i) {
+    var y = T + i * rowH + rowH / 2;
+    s.appendChild(txt(L - 12, y + 3, it.nome, {
+      'text-anchor': 'end', 'font-size': 11,
+      fill: it.forte ? '#E6ECF5' : '#7C8DAA',
+      'font-weight': it.forte ? 700 : 400
+    }));
+    s.appendChild(svg('line', { x1: L, x2: R, y1: y, y2: y,
+      stroke: 'rgba(126,150,190,.14)', 'stroke-width': 1 }));
+    if (it.vazio) {
+      s.appendChild(svg('rect', { x: L + 14, y: y - 8, width: R - L - 28, height: 16, rx: 8,
+        fill: 'none', stroke: 'rgba(103,232,249,.35)', 'stroke-width': 1.2,
+        'stroke-dasharray': '5 5' }));
+      s.appendChild(txt((L + R) / 2, y + 3.5,
+        'exporte a planilha, simule, e traga a faixa para cá',
+        { 'text-anchor': 'middle', 'font-size': 10, fill: '#5A6B87', 'font-style': 'italic' }));
+      return;
+    }
+    s.appendChild(svg('rect', { x: X(it.a), y: y - 7,
+      width: Math.max(2, X(it.b) - X(it.a)), height: 14, rx: 7,
+      fill: it.cor, opacity: it.forte ? .34 : .24 }));
+    s.appendChild(svg('rect', { x: X(it.a), y: y - 7, width: 2.5, height: 14, fill: it.cor }));
+    s.appendChild(svg('rect', { x: X(it.b) - 2.5, y: y - 7, width: 2.5, height: 14, fill: it.cor }));
+    if (isFinite(it.ponto)) {
+      s.appendChild(svg('circle', { cx: X(it.ponto), cy: y, r: 5,
+        fill: it.cor, stroke: '#070B14', 'stroke-width': 1.6 }));
+    }
+    s.appendChild(txt(Math.min(X(it.b) + 10, R - 2), y + 3.5,
+      money(it.a) + ' – ' + money(it.b),
+      { 'font-size': 10, fill: '#E6ECF5',
+        'text-anchor': X(it.b) + 96 > R ? 'end' : 'start' }));
+  });
+
+  var xp = X(PRECO);
+  s.appendChild(svg('line', { x1: xp, x2: xp, y1: 6, y2: H - 20,
+    stroke: '#F5B841', 'stroke-width': 1.5, 'stroke-dasharray': '4 4' }));
+  s.appendChild(txt(xp, H - 5, 'preço de tela ' + money(PRECO),
+    { 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 700, fill: '#F5B841' }));
+
+  var box = el('chartField'); box.innerHTML = ''; box.appendChild(s);
+}
+
+/* --------------------------------------------------- faixa do usuário */
+window.aplicarDcf = function () {
+  var bear = lerNum('inBear'), base = lerNum('inBase'), bull = lerNum('inBull');
+  var msg = el('dcfMsg');
+  if (!isFinite(bear) || !isFinite(base) || !isFinite(bull)) {
+    msg.textContent = 'Preencha os três valores — em reais por ação, como saem da planilha.';
+    msg.className = 'dcfmsg err';
+    return;
+  }
+  if (!(bear <= base && base <= bull)) {
+    msg.textContent = 'Confira a ordem: pessimista ≤ mediana ≤ otimista.';
+    msg.className = 'dcfmsg err';
+    return;
+  }
+  meuDcf = { bear: bear, base: base, bull: bull };
+  var up = base / PRECO - 1;
+  msg.textContent = 'Mediana ' + money(base) + ' → ' + (up >= 0 ? '+' : '')
+    + (up * 100).toFixed(1).replace('.', ',') + '% vs tela · salvo em 10/08/2026.';
+  msg.className = 'dcfmsg';
+  renderField();
+};
+window.limparDcf = function () {
+  meuDcf = null;
+  el('inBear').value = ''; el('inBase').value = ''; el('inBull').value = '';
+  el('dcfMsg').textContent = 'Fica guardado por ticker, com a data da simulação.';
+  el('dcfMsg').className = 'dcfmsg';
+  renderField();
+};
+
+/* ------------------------------------------------------------- export */
+window.exportarDcf = function () {
+  var linhas = [
+    ['WEGE3 - Modelo DCF - exportado do Gab\'s FinLab em 10/08/2026'],
+    ['Versao CSV simplificada. No painel, o botao entrega o .xlsx com formulas vivas e sensibilidade.'],
+    [''],
+    ['DADOS DO PAINEL (CVM / mercado)', 'Valor'],
+    ['FCL medio 3 anos (R$ mi)', '4800'],
+    ['FCL ultimo exercicio (R$ mi)', '5600'],
+    ['Divida liquida (R$ mi)', '-3100'],
+    ['Acoes emitidas (mi)', '4196'],
+    ['Preco de tela (R$)', '41,20'],
+    [''],
+    ['PREMISSAS', 'Pessimista', 'Mediana', 'Otimista'],
+    ['FCL base (R$ mi)', '4800', '4800', '4800'],
+    ['Crescimento ano 1', '6,0%', '12,0%', '18,0%'],
+    ['Crescimento ano 5', '3,5%', '7,0%', '10,0%'],
+    ['Perpetuidade (g)', '3,5%', '5,0%', '6,5%'],
+    ['Beta', '0,80', '0,72', '0,65'],
+    [''],
+    ['Depois de simular no Excel, traga os tres precos justos para o campo "Seu DCF" do painel.']
+  ];
+  var csv = '\uFEFF' + linhas.map(function (l) { return l.join(';'); }).join('\r\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'WEGE3-DCF.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+  el('dcfMsg').textContent = 'Baixado. No produto, este botão entrega o .xlsx completo — veja o exemplo que acompanha esta proposta.';
+  el('dcfMsg').className = 'dcfmsg';
+};
+
+/* --------------------------------------- análise por call (agente, mock) */
+var CALLS = {
+  '2T26': { nota: 'pos', rotulo: 'POSITIVA', texto:
+    '<b>O que foi entregue:</b> margem EBITDA de 23,0% no trimestre, acima do compromisso de 22% '
+    + 'assumido na call anterior, e os embarques da planta do México começaram dentro do prazo. '
+    + '<b>O que ficou devendo:</b> o capex roda a 85% do ritmo guiado para o ano — a gestão manteve o '
+    + 'número cheio, mas não detalhou como recupera no segundo semestre. '
+    + '<b>Principal preocupação dos analistas:</b> demanda nos EUA sob as novas tarifas — foi o tema '
+    + 'mais insistente do Q&A, e a resposta ficou em "monitorando", sem quantificar a exposição. '
+    + '<a href="#" class="trecho">transcrição ↗</a>' },
+  '1T26': { nota: 'pos', rotulo: 'POSITIVA', texto:
+    '<b>O que foi entregue:</b> começo de ano com receita +11% a/a e margem de 22,6%, acima do piso '
+    + 'prometido, com carteira de pedidos recorde citada pela gestão. '
+    + '<b>O que ficou devendo:</b> nada relevante contra o guiado — o trimestre veio limpo. '
+    + '<b>Principal preocupação dos analistas:</b> custo do cobre em alta e repasse de preço — a '
+    + 'gestão respondeu com números: hedge e reajustes já contratados para o 1S. '
+    + '<a href="#" class="trecho">transcrição ↗</a>' },
+  '4T25': { nota: 'neu', rotulo: 'NEUTRA', texto:
+    '<b>O que foi entregue:</b> o ano fechou com margem de 22,3%, dentro da faixa prometida, e caixa '
+    + 'líquido preservado após as aquisições. '
+    + '<b>O que ficou devendo:</b> o guidance de 2026 veio sem meta de margem — quebra do padrão das '
+    + 'últimas divulgações — e o capex anunciado surpreendeu para cima sem detalhamento de retorno. '
+    + '<b>Principal preocupação dos analistas:</b> desaceleração de pedidos na Europa; a resposta '
+    + 'reconheceu o tema e ficou no qualitativo. '
+    + '<a href="#" class="trecho">transcrição ↗</a>' }
+};
+var NOTACLS = { pos: 'pos', neu: 'neu', pes: 'pes' };
+
+window.trocarCall = function (key) {
+  var c = CALLS[key];
+  if (!c) return;
+  document.querySelectorAll('.slot').forEach(function (s) {
+    s.className = 'slot' + (s.getAttribute('data-call') === key ? ' on' : '');
+  });
+  el('callTitulo').textContent = 'Resumo da call ' + key + ' · pelo agente de contexto';
+  var n = el('callNota');
+  n.className = 'nota-call ' + NOTACLS[c.nota];
+  n.textContent = 'nota da call · ' + c.rotulo;
+  el('callTexto').innerHTML = c.texto;
+};
+
+var demoFeita = false;
+window.uploadCall = function () {
+  if (demoFeita) {
+    alert('Demonstracao ja executada - recarregue a pagina para repetir.');
+    return;
+  }
+  demoFeita = true;
+  CALLS['3T26'] = { nota: 'neu', rotulo: 'NEUTRA', texto:
+    '<b>O que foi entregue:</b> nove meses dentro do guidance de receita, com margem de 22,4%. '
+    + '<b>O que ficou devendo:</b> a atualização do plano de capex ficou para a divulgação anual. '
+    + '<b>Principal preocupação dos analistas:</b> câmbio contratado virando em 2027 — resposta '
+    + 'qualitativa. <i>(call fictícia — demonstração do fluxo: a 4T25 acabou de sair da tela para o '
+    + 'WEGE3-calls.md, onde a mesa de IA continua lendo ela)</i> '
+    + '<a href="#" class="trecho">transcrição ↗</a>' };
+  var antiga = document.querySelector('.slot[data-call="4T25"]');
+  if (antiga) antiga.remove();
+  el('arqLista').insertAdjacentHTML('afterbegin',
+    '<span class="arqitem"><i class="dot neu"></i>4T25</span>');
+  el('arqCount').textContent = '6';
+  el('slots').insertAdjacentHTML('afterbegin',
+    '<button class="slot" data-call="3T26" onclick="trocarCall(\'3T26\')">'
+    + '<span class="q"><i class="dot neu"></i>3T26</span>'
+    + '<span class="d">agora · analisando…</span></button>');
+  setTimeout(function () {
+    var d = document.querySelector('.slot[data-call="3T26"] .d');
+    if (d) d.textContent = '10/08/26 · analisada ✓';
+    trocarCall('3T26');
+  }, 1200);
+};
+trocarCall('2T26');
+
+/* --------------------------------------------------------------- tabs */
+window.abrirAba = function (key) {
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.className = 'tab' + (t.getAttribute('data-tab') === key ? ' on' : '');
+  });
+  document.querySelectorAll('[data-panel]').forEach(function (p) {
+    p.hidden = p.getAttribute('data-panel') !== key;
+  });
+};
+window.irParaAba = function (key) {
+  abrirAba(key);
+  document.querySelector('.tabs').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+renderField();
+})();
+</script>
+</body>
+</html>

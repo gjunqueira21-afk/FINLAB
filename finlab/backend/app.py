@@ -58,6 +58,9 @@ def _overview_rows() -> dict:
         tickers = universe.TICKERS
         series = market.price_series(tickers)
         quotes = market.brapi_quotes(tickers)
+        # Uma leitura de macro para as 90: o EPV precisa do WACC, e o WACC
+        # precisa de Rf/CDI, que são os mesmos para o painel inteiro.
+        macro_data = market.macro()
 
         rows = []
         for comp in universe.UNIVERSE:
@@ -68,6 +71,8 @@ def _overview_rows() -> dict:
             snap = metrics.market_snapshot(comp.ticker, series.get(comp.ticker, []), brapi, fund)
             mult = metrics.multiples(fund, snap, brapi)
             sc = scoring.score(fund.get("indicadores", {}), fund.get("financial", False))
+            base = fund.get("base") or {}
+            ind = fund.get("indicadores") or {}
             rows.append({
                 "ticker": comp.ticker,
                 "name": comp.name,
@@ -85,6 +90,28 @@ def _overview_rows() -> dict:
                 "grade": scoring.grade(sc.get("total")),
                 "cobertura": sc.get("cobertura"),
                 "parcial": sc.get("parcial"),
+                # A tela principal carregava só múltiplos e nota. A mesa,
+                # perguntada sobre o conjunto ("quais estão mais perto do
+                # próprio valor de poder de lucro?"), não tinha como
+                # responder sem abrir empresa por empresa. Agora o essencial
+                # do dossiê de cada uma viaja junto da linha.
+                "valor": _epv_da_linha(fund, snap, macro_data, brapi),
+                "porte": {
+                    "receita": base.get("receita"),
+                    "lucro_liquido": base.get("lucro_liquido"),
+                    "ebitda": base.get("ebitda"),
+                    "fcl": base.get("fcl"),
+                    "divida_liquida": base.get("divida_liquida"),
+                    "patrimonio_liquido": base.get("patrimonio_liquido"),
+                },
+                "qualidade": {
+                    "mg_ebitda": ind.get("mg_ebitda"),
+                    "mg_liquida": ind.get("mg_liquida"),
+                    "roic": ind.get("roic"),
+                    "cagr_receita_3a": ind.get("cagr_receita_3a"),
+                    "cagr_lucro_3a": ind.get("cagr_lucro_3a"),
+                    "consistencia_lucro": ind.get("consistencia_lucro"),
+                },
                 "pilares": [{"key": p["key"], "label": p["label"], "score": p["score"]}
                             for p in sc.get("pilares", [])],
             })
@@ -100,7 +127,37 @@ def _overview_rows() -> dict:
             "cvm_disponivel": cvm.available(),
         }
 
-    return _com_diagnostico(cache.memoize("overview:v4", TTL_QUOTE, build) or {"rows": []})
+    # v5: a linha ganhou valor (EPV), porte e qualidade. Sem o bump, quem já
+    # tem o blob antigo veria a mesa dizer que não tem o dado que existe.
+    return _com_diagnostico(cache.memoize("overview:v5", TTL_QUOTE, build) or {"rows": []})
+
+
+def _epv_da_linha(fund: dict, snap: dict, macro_data: dict,
+                  brapi: Optional[dict]) -> dict:
+    """EPV por ação e a distância dele para o preço de tela.
+
+    Só para quem o método comporta: em banco e seguradora o EPV pela firma
+    não significa nada, e o campo sai vazio em vez de sair errado.
+    """
+    # O LPA vale para todo mundo — inclusive banco, onde é a métrica central.
+    # Só o EPV é que não se aplica a instituição financeira.
+    lucro = (fund.get("base") or {}).get("lucro_liquido")
+    acoes = snap.get("shares_quote")
+    out = {"epv_por_acao": None, "epv_upside": None, "wacc": None,
+           "lpa": round(lucro / acoes, 4) if lucro is not None and acoes else None}
+    if fund.get("financial"):
+        return out
+    try:
+        prem = valuation.assumptions(fund, snap, macro_data or {}, brapi)
+        v = valuation.epv(prem)
+    except Exception:
+        # A tela principal não pode cair por causa de uma empresa com dado
+        # torto: sem valor, a linha continua com múltiplos e nota.
+        return out
+    out["epv_por_acao"] = round(v["por_acao"], 4) if v.get("por_acao") is not None else None
+    out["epv_upside"] = round(v["upside"], 4) if v.get("upside") is not None else None
+    out["wacc"] = prem.get("wacc")
+    return out
 
 
 def _com_diagnostico(payload: dict) -> dict:

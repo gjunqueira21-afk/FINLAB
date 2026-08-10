@@ -593,15 +593,20 @@ def test_contexto_da_tela_de_acoes_carrega_a_lista_inteira():
     overview = {
         "rows": [
             {"rank": 1, "ticker": "PRIO3", "sector": "OIL", "score": 87.6,
-             "price": 40.0, "financial": False,
+             "price": 40.0, "financial": False, "market_cap": 34e9,
              "perf": {"m12": 0.35, "ytd": 0.12},
              "multiples": {"pl": 9.9, "pvp": 2.3, "dy": 0.051, "roe": 0.22,
-                           "nd_ebitda": 0.4}},
+                           "ev_ebitda": 4.2, "nd_ebitda": 0.4},
+             "valor": {"epv_por_acao": 38.4, "epv_upside": -0.04, "lpa": 4.05},
+             "porte": {"receita": 25e9, "lucro_liquido": 7e9},
+             "qualidade": {"mg_ebitda": 0.62, "mg_liquida": 0.28, "roic": 0.19,
+                           "cagr_receita_3a": 0.31, "cagr_lucro_3a": 0.22}},
             {"rank": 2, "ticker": "ITUB4", "sector": "FIN", "score": 80.0,
              "price": None, "financial": True,
              "perf": {"m12": None, "ytd": None},
              "multiples": {"pl": 8.0, "pvp": 1.8, "dy": None, "roe": 0.21,
-                           "nd_ebitda": None}},
+                           "nd_ebitda": None},
+             "valor": {"epv_por_acao": None, "epv_upside": None, "lpa": 3.7}},
         ],
         "sector_stats": {"OIL": {"n": 7, "score": 68.0, "pl": 6.1, "pvp": 1.2,
                                  "dy": 0.08, "roe": 0.15}},
@@ -611,10 +616,20 @@ def test_contexto_da_tela_de_acoes_carrega_a_lista_inteira():
 
     ctx = agents.contexto_lista_acoes(overview, macro, setores)
     assert "TELA ABERTA" in ctx and "2 ações" in ctx
-    assert "1. PRIO3 (Petróleo) nota 87,6 | R$ 40,00 | 12m +35,0% | YTD +12,0% | " \
-           "P/L 9,9x | P/VP 2,3x | DY +5,1% | ROE +22,0% | DL/EBITDA 0,4x" in ctx
-    # banco: sem cotação não vira número, e DL/EBITDA é n/a por definição
-    assert "2. ITUB4 (Bancos) nota 80,0 | sem cotação | 12m n/a" in ctx
+    # a linha carrega o dossiê resumido: valor, múltiplos, qualidade e porte
+    assert ("1. PRIO3 (Petróleo) nota 87,6 | R$ 40,00 | EPV R$ 38,40 (dist -4,0%) | "
+            "LPA 4,05 | 12m +35,0% · YTD +12,0% | P/L 9,9x · P/VP 2,3x · "
+            "EV/EBITDA 4,2x · DY +5,1% · ROE +22,0% · ROIC +19,0% · DL/EBITDA 0,4x") in ctx
+    assert "mg EBITDA +62,0% · mg líq +28,0% | CAGR rec +31,0% · lucro +22,0%" in ctx
+    assert "receita R$ 25,00 bi · lucro R$ 7,00 bi · mkt cap R$ 34,00 bi" in ctx
+    # banco: sem cotação não vira número; EPV não se aplica, mas o LPA sim
+    assert "2. ITUB4 (Bancos) nota 80,0 | sem cotação | n/a (financeira) | LPA 3,70" in ctx
+
+    # e a instrução de garimpo, que é o que autoriza a mesa a ordenar/filtrar
+    # em vez de dizer que precisa abrir empresa por empresa
+    assert "VOCÊ TEM O PAINEL INTEIRO AQUI" in ctx
+    assert "não peça para abrir empresa por empresa" in ctx
+    assert "\"Perto do EPV\" é |dist| pequena" in ctx
     assert "DL/EBITDA n/a" in ctx
     assert "Petróleo (7 ações): nota 68,0 · P/L 6,1x" in ctx
     assert "SELIC: 14,15%" in ctx
@@ -2770,3 +2785,61 @@ def test_mesa_fecha_com_modelo_lendo_as_falas(monkeypatch):
         "ticker": "PETR4", "pergunta": "e o beta?", "agente": "premissas",
     })
     assert visto["pergunta"] == "e o beta?"
+
+
+def test_epv_do_servidor_bate_com_o_motor_do_navegador():
+    """O EPV existe em dois lugares — engine.js (por empresa, com sliders) e
+    valuation.py (as 90 da tela principal). Divergir seria o painel dizer um
+    número e a mesa outro sobre a MESMA empresa."""
+    prem = {"ebit_normalizado": 8000.0, "wacc": 0.152, "tax": 0.34,
+            "divida_liquida": 12000.0, "shares": 4196.0, "preco": 41.20}
+    v = valuation.epv(prem)
+
+    # a conta do engine.js, escrita à mão aqui: EBIT após imposto / WACC
+    esperado_valor = 8000.0 * (1 - 0.34) / 0.152
+    assert v["valor"] == pytest.approx(esperado_valor)
+    assert v["equity"] == pytest.approx(esperado_valor - 12000.0)
+    assert v["por_acao"] == pytest.approx((esperado_valor - 12000.0) / 4196.0)
+    assert v["upside"] == pytest.approx(v["por_acao"] / 41.20 - 1)
+
+    # dívida líquida ausente é zero, não erro (caixa líquido some no None)
+    assert valuation.epv({"ebit_normalizado": 100.0, "wacc": 0.1,
+                          "shares": 10.0})["equity"] == pytest.approx(660.0)
+    # sem EBIT, sem WACC ou com WACC ≤ 0 não há valor — e nada explode
+    assert valuation.epv({"wacc": 0.1})["por_acao"] is None
+    assert valuation.epv({"ebit_normalizado": 100.0, "wacc": 0})["por_acao"] is None
+    assert valuation.epv({})["valor"] is None
+    # sem ações, o valor da firma existe mas o por-ação não
+    semacoes = valuation.epv({"ebit_normalizado": 100.0, "wacc": 0.1, "tax": 0.0})
+    assert semacoes["valor"] == pytest.approx(1000.0) and semacoes["por_acao"] is None
+
+
+def test_linha_da_tela_principal_traz_epv_lpa_e_nao_cai_com_dado_torto(monkeypatch):
+    """A linha do overview é o que a mesa lê: EPV para operacional, LPA para
+    todo mundo, e nenhuma empresa com dado torto pode derrubar a tela."""
+    from finlab.backend import app as bapp
+
+    fund = {"financial": False, "base": {"lucro_liquido": 6840.0}}
+    snap = {"shares_quote": 4196.0, "price": 41.20}
+    monkeypatch.setattr(bapp.valuation, "assumptions", lambda *a, **kw: {
+        "ebit_normalizado": 8230.0, "wacc": 0.152, "tax": 0.34,
+        "divida_liquida": -3100.0, "shares": 4196.0, "preco": 41.20})
+
+    linha = bapp._epv_da_linha(fund, snap, {}, None)
+    assert linha["epv_por_acao"] is not None and linha["epv_upside"] is not None
+    assert linha["lpa"] == pytest.approx(6840.0 / 4196.0, abs=1e-4)
+    assert linha["wacc"] == 0.152
+
+    # financeira: sem EPV por definição, mas COM LPA — é a métrica do setor
+    banco = bapp._epv_da_linha({"financial": True, "base": {"lucro_liquido": 1000.0}},
+                               {"shares_quote": 500.0}, {}, None)
+    assert banco["epv_por_acao"] is None
+    assert banco["lpa"] == pytest.approx(2.0)
+
+    # premissa que explode não derruba a linha inteira
+    def explode(*a, **kw):
+        raise RuntimeError("dado torto")
+    monkeypatch.setattr(bapp.valuation, "assumptions", explode)
+    caido = bapp._epv_da_linha(fund, snap, {}, None)
+    assert caido["epv_por_acao"] is None
+    assert caido["lpa"] == pytest.approx(6840.0 / 4196.0, abs=1e-4), "o LPA sobrevive"
