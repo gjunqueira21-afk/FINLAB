@@ -1046,3 +1046,98 @@ a.ipe-assunto:hover { color: var(--brand); border-bottom-color: var(--brand); }
 .dcfmsg b { color: var(--paper); }
 .dcfbtns { display: flex; gap: 8px; flex-wrap: wrap; }
 .exportline { border-top: 1px dashed var(--line); margin-top: 13px; padding-top: 12px; }
+
+/* ------------------------ aba "Contexto & calls" (redesenho, seção 5) */
+.badge-regime {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 700 10.5px/1 var(--mono); letter-spacing: .04em;
+  color: var(--rc, var(--dim)); background: var(--ink2);
+  border: 1px solid var(--rc, var(--line2)); border-radius: 999px;
+  padding: 6px 11px; white-space: nowrap;
+}
+.badge-regime .g { color: var(--dim2); }
+.badge-regime.clicavel { cursor: pointer; }
+.badge-regime.clicavel:hover { background: rgba(103, 232, 249, .07); }
+
+.dropzone {
+  border: 1.5px dashed rgba(103, 232, 249, .4); border-radius: var(--r-sm);
+  padding: 13px 16px; font: 400 12px/1.5 var(--sans); color: var(--dim);
+  cursor: pointer; margin-bottom: 10px; background: rgba(103, 232, 249, .03);
+}
+.dropzone b { color: var(--brand); }
+.dropzone:hover, .dropzone.drag { border-color: var(--brand); }
+
+.call-form-linha {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;
+}
+.call-form-linha .mini {
+  font: 700 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--dim2);
+}
+.call-form-linha input[type="date"] {
+  font: 600 12px var(--mono); color: var(--paper); background: var(--ink2);
+  border: 1px solid var(--line2); border-radius: var(--r-sm); padding: 7px 9px;
+}
+.call-form-linha input[type="text"] {
+  flex: 1 1 260px; min-height: 34px; padding: 7px 9px;
+  font: 500 12px var(--mono); color: var(--paper);
+  background: var(--ink2); border: 1px solid var(--line2); border-radius: var(--r-sm);
+}
+.ctx-aviso { font: 500 11px/1.5 var(--mono); margin: -4px 0 12px; color: var(--dim); }
+.ctx-aviso.ok { color: var(--green); }
+.ctx-aviso.warn { color: var(--amber); }
+.ctx-aviso.err { color: var(--red); }
+
+.slots { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.slot {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  font: 600 11px var(--mono); color: var(--dim); background: var(--ink2);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 12px;
+  cursor: pointer; min-height: 44px;
+}
+.slot .q {
+  font: 700 12.5px var(--mono); color: var(--paper);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.slot .d { font: 500 9px var(--mono); color: var(--dim2); }
+.slot.on { border-color: rgba(103, 232, 249, .55); background: rgba(103, 232, 249, .07); }
+.slot.on .q { color: var(--brand); }
+.slotnote { font: 400 9.5px var(--mono); color: var(--dim2); }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.pos { background: var(--green); box-shadow: 0 0 5px rgba(52, 211, 153, .7); }
+.dot.neu { background: var(--amber); box-shadow: 0 0 5px rgba(245, 184, 65, .7); }
+.dot.pes { background: var(--red); box-shadow: 0 0 5px rgba(248, 113, 113, .7); }
+.dot.off { background: var(--dim2); }
+
+.arquivo {
+  font: 500 10.5px/1.7 var(--mono); color: var(--dim);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--ink2); padding: 7px 12px; margin: 8px 0 14px;
+  display: flex; gap: 7px; flex-wrap: wrap; align-items: center;
+}
+.arquivo b { color: var(--paper); }
+.arqitem { display: inline-flex; align-items: center; gap: 5px; color: var(--paper); }
+.arquivo .trecho { color: var(--brand); text-decoration: none; }
+.arquivo .trecho:hover { text-decoration: underline; }
+
+.callhead {
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; border-top: 1px dashed var(--line);
+  padding-top: 13px; margin-top: 4px;
+}
+.nota-call {
+  font: 700 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  border-radius: 999px; padding: 6px 11px; border: 1px solid;
+}
+.nota-call.pos { color: var(--green); border-color: rgba(52, 211, 153, .5); background: rgba(52, 211, 153, .08); }
+.nota-call.neu { color: var(--amber); border-color: rgba(245, 184, 65, .5); background: rgba(245, 184, 65, .08); }
+.nota-call.pes { color: var(--red); border-color: rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .08); }
+.nota-call.off { color: var(--dim2); border-color: var(--line2); }
+
+.ancoras { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: 2px; }
+.ancoras code {
+  font: 600 10px var(--mono); color: var(--brand2);
+  background: rgba(167, 139, 250, .08); border: 1px solid rgba(167, 139, 250, .3);
+  border-radius: 5px; padding: 2px 6px;
+}

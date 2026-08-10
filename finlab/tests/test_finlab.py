@@ -3161,3 +3161,168 @@ def test_planilha_dcf_recusa_financeira_e_falta_de_dado():
                              {"financial": False})
     ws = _abrir_planilha(blob)["DCF"]
     assert ws["B7"].value == ws["B6"].value == 4800
+
+
+# ---------------------------------------------------------------------------
+# Análise de call pelo agente de contexto (spec 4.2/4.4 do redesenho)
+# ---------------------------------------------------------------------------
+
+def test_rotulo_da_call_prioriza_titulo_e_cai_no_calendario():
+    """O rótulo XTXX identifica a call no arquivo e nas citações. O título
+    manda; sem ele, vale o calendário de resultados: a call divulga o
+    trimestre ANTERIOR à sua data — confere com o arquivo de referência."""
+    from finlab.backend import call_analise as ca
+
+    assert ca.rotulo_da_call("2026-08-07", "Call do 3T26") == "3T26"
+    # heurística: agosto→2T, maio→1T, fevereiro→4T do ano anterior…
+    assert ca.rotulo_da_call("2026-08-07") == "2T26"
+    assert ca.rotulo_da_call("2026-05-08") == "1T26"
+    assert ca.rotulo_da_call("2026-02-27") == "4T25"
+    assert ca.rotulo_da_call("2025-10-30") == "3T25"
+    assert ca.rotulo_da_call("2025-07-31") == "2T25"
+
+
+def test_analise_de_call_valida_em_codigo_nao_no_prompt(monkeypatch):
+    """O modelo pode devolver nota inventada e âncora que não existe — quem
+    barra é o validador, não a instrução. Só âncoras da transcrição passam."""
+    from finlab.backend import call_analise as ca, calls as bcalls
+
+    seg = bcalls.segmentar(_CALL)
+    resposta = {
+        "nota": "ÓTIMA",                        # fora do conjunto → None
+        "entregue": "margem de 34%, recorde",
+        "devendo": None,
+        "preocupacao": "prazo da desalavancagem",
+        "motivo": "a call não menciona promessas anteriores",
+        "trechos": ["2T26#qa-01", "2T26#qa-99", "outra-call#qa-01", 123],
+    }
+    monkeypatch.setattr(ca.agents, "chat",
+                        lambda *a, **k: "```json\n" + json.dumps(resposta) + "\n```")
+
+    analise = ca.analisar({"provider": "openrouter", "api_key": "k",
+                           "model": "m"}, "2T26", seg)
+    assert analise["nota"] is None
+    assert analise["entregue"] == "margem de 34%, recorde"
+    assert analise["devendo"] is None
+    assert analise["motivo"] == "a call não menciona promessas anteriores"
+    # só a âncora que EXISTE sobreviveu
+    assert analise["trechos"] == ["2T26#qa-01"]
+
+    # resposta sem JSON nenhum → ValueError (o chamador guarda o erro)
+    monkeypatch.setattr(ca.agents, "chat", lambda *a, **k: "não sei responder")
+    with pytest.raises(ValueError):
+        ca.analisar({"provider": "openrouter", "api_key": "k", "model": "m"},
+                    "2T26", seg)
+
+
+def test_call_com_slot_analisa_cacheia_e_regenera_o_md(tmp_path, monkeypatch):
+    """O fluxo inteiro da rota: indexa, UMA chamada ao provedor, cache em
+    data/calls/, e o {ticker}-calls.md regenerado com o formato do arquivo
+    de referência — e indexado para a mesa citar [call:XTXX]."""
+    from finlab.backend import app as bapp, call_analise as ca, docs as bdocs
+
+    monkeypatch.setattr(bdocs, "DB_PATH", tmp_path / "docs.sqlite")
+    monkeypatch.setattr(ca, "DIR_CALLS", tmp_path / "calls")
+
+    chamadas = []
+
+    def fake_chat(provider, api_key, model, system, user, **kw):
+        chamadas.append({"system": system, "user": user})
+        return json.dumps({
+            "nota": "positiva",
+            "entregue": "margem de 34%, recorde da companhia",
+            "devendo": "capex de 2027 sem detalhamento",
+            "preocupacao": "prazo para desalavancar até 2,0x; resposta com data (4T27)",
+            "motivo": None,
+            "trechos": ["2T26#qa-01"],
+        })
+    monkeypatch.setattr(ca.agents, "chat", fake_chat)
+
+    r = bapp.api_call_nova("WEGE3", {
+        "data": "2026-08-07", "texto": _CALL, "titulo": "Call do 2T26",
+        "slot": {"provider": "openrouter", "api_key": "k", "model": "m"},
+    })
+    assert r["rotulo"] == "2T26"
+    assert r["analise"]["nota"] == "positiva"
+    assert len(chamadas) == 1
+    # o critério fixo da nota viaja no prompt — é ele que torna calls comparáveis
+    assert "ENTREGOU o que havia prometido" in chamadas[0]["system"]
+    assert "2T26#qa-01" in chamadas[0]["user"]
+
+    # cache em disco: navegar entre calls nunca chama o LLM de novo
+    reg = ca.carregar("WEGE3", "call-2026-08-07")
+    assert reg["analise"]["nota"] == "positiva"
+    lista = bapp.api_calls("WEGE3")["calls"]
+    assert lista[0]["nota"] == "positiva" and lista[0]["na_tela"] is True
+    assert len(chamadas) == 1, "listar chamou o LLM"
+
+    # o arquivo canônico, no formato de referência
+    md = ca.caminho_md("WEGE3").read_text(encoding="utf-8")
+    assert "# WEGE3 · Arquivo de calls" in md
+    assert "## [call:2T26] — 07/08/2026 · nota: **POSITIVA** · na tela" in md
+    assert "**Entregue:** margem de 34%" in md
+    assert "`2T26#qa-01`" in md
+
+    # e a mesa recupera a ANÁLISE pelo índice, com o marcador [call:XTXX]
+    achados = bdocs.search(universe.get("WEGE3").cd_cvm, "capex 2027 sem detalhamento")
+    assert any("[call:2T26]" in a["trecho"] for a in achados)
+
+
+def test_call_sem_provedor_degrada_e_arquiva_na_quarta(tmp_path, monkeypatch):
+    """Sem slot, a call entra no índice sem análise — com a mensagem certa.
+    E a 4ª call empurra a mais antiga para fora da tela, com a data de
+    arquivamento = a data da call que a empurrou (regra do arquivo)."""
+    from finlab.backend import app as bapp, call_analise as ca, docs as bdocs
+
+    monkeypatch.setattr(bdocs, "DB_PATH", tmp_path / "docs.sqlite")
+    monkeypatch.setattr(ca, "DIR_CALLS", tmp_path / "calls")
+
+    datas = ["2025-10-30", "2026-02-27", "2026-05-08", "2026-08-07"]
+    for d in datas[:3]:
+        r = bapp.api_call_nova("WEGE3", {"data": d, "texto": _CALL})
+        assert r["analise"] is None
+        assert "provedor" in r["mensagem"].lower()
+
+    lista = bapp.api_calls("WEGE3")["calls"]
+    assert [c["na_tela"] for c in lista] == [True, True, True]
+
+    bapp.api_call_nova("WEGE3", {"data": datas[3], "texto": _CALL})
+    lista = bapp.api_calls("WEGE3")["calls"]
+    assert [c["rotulo"] for c in lista] == ["2T26", "1T26", "4T25", "3T25"]
+    assert [c["na_tela"] for c in lista] == [True, True, True, False]
+    # 3T25 saiu quando a 2T26 entrou: arquivada na data DELA
+    assert lista[3]["arquivada_em"] == "2026-08-07"
+
+    md = ca.caminho_md("WEGE3").read_text(encoding="utf-8")
+    assert "## [call:3T25] — 30/10/2025 · nota: **SEM ANÁLISE** · " \
+           "arquivada da tela em 07/08/2026" in md
+    assert md.count("## [call:") == 4, "o arquivo tem de guardar TODAS as calls"
+
+    # remover por engano: o cache sai e o arquivo é regenerado sem a call
+    bapp.api_call_remover("WEGE3", "call-2026-08-07")
+    md = ca.caminho_md("WEGE3").read_text(encoding="utf-8")
+    assert md.count("## [call:") == 3
+    assert ca.carregar("WEGE3", "call-2026-08-07") is None
+
+
+def test_erro_do_provedor_nao_perde_a_call(tmp_path, monkeypatch):
+    """Provedor fora do ar no meio do upload: a transcrição fica indexada e a
+    mensagem explica — nunca um 500 que joga o trabalho fora."""
+    from finlab.backend import agents as bagents, app as bapp
+    from finlab.backend import call_analise as ca, docs as bdocs
+
+    monkeypatch.setattr(bdocs, "DB_PATH", tmp_path / "docs.sqlite")
+    monkeypatch.setattr(ca, "DIR_CALLS", tmp_path / "calls")
+
+    def explode(*a, **k):
+        raise bagents.LLMError("Chave de API rejeitada (401).")
+    monkeypatch.setattr(ca.agents, "chat", explode)
+
+    r = bapp.api_call_nova("WEGE3", {
+        "data": "2026-08-07", "texto": _CALL,
+        "slot": {"provider": "openrouter", "api_key": "ruim", "model": "m"},
+    })
+    assert r["analise"] is None
+    assert "401" in r["mensagem"]
+    assert [c["protocolo"] for c in bapp.api_calls("WEGE3")["calls"]] \
+        == ["call-2026-08-07"]
