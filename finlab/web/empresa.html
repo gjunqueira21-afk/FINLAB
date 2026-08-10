@@ -88,17 +88,20 @@
     <main>
       <div class="tabs" id="tabs">
         <button class="tab on" data-tab="valuation">Valuation</button>
-        <button class="tab" data-tab="fundamentos">Fundamentos</button>
         <button class="tab" data-tab="saude">Nota de saúde</button>
-        <button class="tab" data-tab="pares">Múltiplos &amp; pares</button>
       </div>
 
       <section data-panel="valuation"></section>
-      <section data-panel="fundamentos" hidden></section>
       <section data-panel="saude" hidden></section>
-      <section data-panel="pares" hidden></section>
     </main>
   </div>
+
+  <!-- Corpo de leitura (tear sheet). Largura cheia, fora do grid da sidebar:
+       tabela de DRE é larga por natureza, e a sidebar de premissas sai no
+       próximo passo do redesenho. -->
+  <section class="panel" id="dreAnual"></section>
+  <section class="panel" id="dreTrimestral"></section>
+  <section class="panel" id="paresPanel"></section>
 
   <div class="foot" id="foot"></div>
 </div>
