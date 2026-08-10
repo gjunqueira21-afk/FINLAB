@@ -473,3 +473,43 @@ def _motivo(fund: dict, fcf_base: Optional[float], snap: dict) -> Optional[str]:
     if not snap.get("shares_quote"):
         return "Quantidade de ações indisponível — o preço-alvo por ação não pode ser calculado."
     return None
+
+
+# ---------------------------------------------------------------------------
+# Poder de lucro (EPV) no servidor
+# ---------------------------------------------------------------------------
+
+def epv(prem: dict) -> dict:
+    """Valor por poder de lucro, por ação — a porta em Python do `epv()` do
+    engine.js, dígito por dígito.
+
+    O motor de valuation vive no navegador porque lá ele recalcula a cada
+    slider. Mas a TELA PRINCIPAL não tem sliders e tem 90 empresas: para a
+    mesa poder responder "quais estão mais perto do próprio valor de poder de
+    lucro" sem abrir empresa por empresa, o número precisa existir antes,
+    aqui. É a mesma conta — EBIT normalizado depois de imposto capitalizado
+    ao WACC, menos dívida líquida, dividido pelas ações —, então os dois
+    lugares não podem divergir; há teste comparando os dois.
+
+    Sem crescimento no numerador de propósito: EPV mede o que a empresa vale
+    parada, com o lucro que já demonstra. É o piso contra o qual o preço de
+    tela é lido.
+    """
+    vazio = {"valor": None, "equity": None, "por_acao": None, "upside": None}
+    ebit = prem.get("ebit_normalizado")
+    w = prem.get("wacc")
+    if not isinstance(ebit, (int, float)) or not isinstance(w, (int, float)) or w <= 0:
+        return vazio
+
+    valor = (ebit * (1 - prem.get("tax", TAX_RATE))) / w
+    dl = prem.get("divida_liquida")
+    equity = valor - (dl if isinstance(dl, (int, float)) else 0.0)
+
+    acoes = prem.get("shares")
+    if not isinstance(acoes, (int, float)) or acoes <= 0:
+        return {"valor": valor, "equity": equity, "por_acao": None, "upside": None}
+
+    por_acao = equity / acoes
+    preco = prem.get("preco")
+    upside = (por_acao / preco - 1) if isinstance(preco, (int, float)) and preco > 0 else None
+    return {"valor": valor, "equity": equity, "por_acao": por_acao, "upside": upside}
