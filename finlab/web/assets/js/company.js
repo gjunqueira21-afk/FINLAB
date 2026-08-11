@@ -54,7 +54,8 @@
             h('span', { class: 'score-badge ' + banda, style: 'margin-left:4px' }, [
               h('span', {}, isNum(sc.total) ? fmt.num(sc.total, 1) : '—'),
               h('span', { class: 'g' }, 'saúde')
-            ])
+            ]),
+            badgeRegime()
           ]),
           h('div', {
             style: 'font:400 11px var(--mono);color:var(--dim2);margin-top:6px'
@@ -84,6 +85,32 @@
         ])
       ])
     ]));
+  }
+
+  /** O regime como badge clicável (spec 3.1): abre o dossiê na aba
+   *  "Contexto & calls" em vez de reservar um painel inteiro só para si. */
+  function badgeRegime() {
+    const r = state.data.regime;
+    if (!r || !r.codigo) return null;
+    const REGIME_COR_BADGE = {
+      R0: '#34D399', R1: '#38BDF8', R2: '#67E8F9',
+      R3: '#F87171', R4: '#FB923C', R5: '#A78BFA'
+    };
+    return h('button', {
+      class: 'badge-regime clicavel',
+      style: `--rc:${REGIME_COR_BADGE[r.codigo] || 'var(--dim)'}`,
+      title: 'Abrir o dossiê do regime e as calls',
+      onclick: () => abrirAba('contexto')
+    }, [`${r.codigo} · ${r.rotulo} `, h('span', { class: 'g' }, '▸')]);
+  }
+
+  /** Ativa uma aba programaticamente (o badge do strip usa isto). */
+  function abrirAba(chave) {
+    const btn = qs(`.tab[data-tab="${chave}"]`);
+    if (btn) {
+      btn.click();
+      el('tabs').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   function miniStat(label, value, sub, cls) {
@@ -707,8 +734,14 @@
     const host = qs(`[data-panel="${state.tab}"]`);
     if (host) host.dataset.done = '';
     if (state.tab === 'saude') renderSaude();
+    if (state.tab === 'contexto') renderContexto();
     // As seções de leitura são fixas, não abas: remontam sempre.
     renderCorpoDeLeitura();
+  }
+
+  function renderContexto() {
+    const host = qs('[data-panel="contexto"]');
+    if (host && window.FLCalls) window.FLCalls.render(host);
   }
 
   /** A largura mudou: todo SVG precisa nascer de novo — o football inclusive. */
@@ -731,6 +764,7 @@
         state.tab = btn.dataset.tab;
         qsa('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== state.tab; });
         if (state.tab === 'saude') renderSaude();
+        if (state.tab === 'contexto') renderContexto();
       });
     });
   }
@@ -1206,6 +1240,19 @@
           voltar.href = '/bdrs';
           voltar.textContent = '← BDRs';
         }
+      }
+
+      // A aba Contexto & calls é do módulo calls.js; ele lê os dados da
+      // página por função (sempre frescos) e devolve a lista quando muda.
+      if (window.FLCalls) {
+        window.FLCalls.init({
+          ticker: state.ticker,
+          dados: () => state.data,
+          aoAtualizar: (lista) => {
+            state.data.calls = lista;
+            renderRegime();   // o painel de momento mostra as mesmas calls
+          }
+        });
       }
 
       bindTabs();
