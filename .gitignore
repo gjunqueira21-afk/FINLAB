@@ -16,6 +16,8 @@ finlab/data/cache/
 finlab/data/history.csv
 # Placar de promessas: memória de análise do usuário sobre a gestão
 finlab/data/promessas.json
+# Análises de call e o arquivo {ticker}-calls.md: nascem de transcrições, ficam locais
+finlab/data/calls/
 # Conteúdo dos documentos e transcrições de call: baixado/colado localmente,
 # nunca no repositório (parecer 03 §3.4 — o diretório tem parquets versionados,
 # então estes precisam ser excluídos por nome)

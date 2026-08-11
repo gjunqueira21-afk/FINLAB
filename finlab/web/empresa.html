@@ -25,83 +25,38 @@
   </header>
 
   <div id="companyStrip"></div>
-  <div class="tese-bar" id="teseBar"></div>
   <div id="alertZone"></div>
 
-  <section class="panel" id="regimePanel" hidden>
+  <!-- O regime não tem mais painel próprio: virou o badge clicável do strip,
+       e o dossiê completo vive na aba "Contexto & calls". -->
+
+  <!-- Quanto vale, afinal (redesenho 3.2): a página NÃO calcula preço justo.
+       O football compara referências de mercado no mesmo eixo, e a linha
+       "Seu DCF" vem da planilha exportada, digitada de volta no cartão. -->
+  <section class="panel" id="valorPanel">
     <div class="panel-h">
-      <div class="ptitle"><b>Em que momento a empresa está</b> · o regime decide se o modelo abaixo faz sentido</div>
-      <div class="psub">classificação a partir das demonstrações da CVM</div>
+      <div>
+        <div class="ptitle"><b>Quanto vale, afinal</b> · referências de mercado no mesmo eixo — o valuation é seu</div>
+        <div class="psub">a linha tracejada é o preço de tela · você simula na planilha e traz a faixa</div>
+      </div>
     </div>
-    <div id="regimeCorpo"></div>
+    <div class="valgrid">
+      <div class="chartbox" id="chartField"></div>
+      <div class="dcfcard" id="dcfCard"></div>
+    </div>
   </section>
 
-  <section class="panel" id="footballPanel" hidden>
-    <div class="panel-h">
-      <div class="ptitle"><b>Quanto vale, afinal</b> · preço justo por método, no mesmo eixo</div>
-      <div class="psub">a linha tracejada é o preço de tela</div>
-    </div>
-    <div class="chartbox" id="chartFootball"></div>
-    <div class="note" id="footballNota"></div>
-  </section>
-
-  <section class="panel" id="heroPanel">
-    <div class="panel-h">
-      <div class="ptitle"><b>Régua de valuation</b> · preço justo por ação conforme o crescimento dos fluxos</div>
-      <div class="legend">
-        <span><i style="background:#38BDF8"></i>upside &gt; 30%</span>
-        <span><i style="background:#7DD3FC"></i>upside 0 a 30%</span>
-        <span><i style="background:#FDBA74"></i>downside até 20%</span>
-        <span><i style="background:#FB923C"></i>downside &gt; 20%</span>
-      </div>
-    </div>
-    <div class="chartbox" id="chartRegua" style="height:290px"></div>
-
-    <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:14px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        <div>
-          <div style="font:600 13.5px var(--sans)">Crescimento do fluxo de caixa livre</div>
-          <small style="display:block;font:400 11px var(--mono);color:var(--dim);margin-top:3px"
-                 id="heroHint">taxa aplicada aos anos explícitos da projeção</small>
-        </div>
-        <div style="font:700 30px/1 var(--mono);color:var(--brand)" id="heroVal">—</div>
-      </div>
-      <input type="range" id="heroGrowth" min="-0.15" max="0.30" step="0.002" value="0.05"
-             aria-label="Crescimento do fluxo de caixa livre">
-      <!-- Rótulos em posições lineares reais do range (-15 a +30, passo 15). -->
-      <div style="display:flex;justify-content:space-between;font:400 10px var(--mono);color:var(--dim2)">
-        <span>-15%</span><span>0%</span><span>+15%</span><span>+30%</span>
-      </div>
-      <div id="heroMarks" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;
-           font:500 11.5px/1.6 var(--mono);color:var(--dim)"></div>
-    </div>
-
-    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:14px;border-top:1px dashed var(--line);padding-top:13px"
-         id="scenarioRow"></div>
-  </section>
-
-  <section class="kpis k6" id="kpis"></section>
-
-  <div class="layout">
-    <aside class="side" id="controls" aria-label="Premissas do modelo"></aside>
-
-    <main>
-      <div class="tabs" id="tabs">
-        <button class="tab on" data-tab="valuation">Valuation</button>
-        <button class="tab" data-tab="saude">Nota de saúde</button>
-      </div>
-
-      <section data-panel="valuation"></section>
-      <section data-panel="saude" hidden></section>
-    </main>
-  </div>
-
-  <!-- Corpo de leitura (tear sheet). Largura cheia, fora do grid da sidebar:
-       tabela de DRE é larga por natureza, e a sidebar de premissas sai no
-       próximo passo do redesenho. -->
+  <!-- Corpo de leitura (tear sheet): DRE anual, trimestres e pares. -->
   <section class="panel" id="dreAnual"></section>
   <section class="panel" id="dreTrimestral"></section>
   <section class="panel" id="paresPanel"></section>
+
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-tab="saude">Nota de saúde</button>
+    <button class="tab" data-tab="contexto">Contexto &amp; calls</button>
+  </div>
+  <section data-panel="saude"></section>
+  <section class="panel" data-panel="contexto" hidden></section>
 
   <div class="foot" id="foot"></div>
 </div>
@@ -111,6 +66,8 @@
 <script src="/assets/js/engine.js"></script>
 <script src="/assets/js/settings.js"></script>
 <script src="/assets/js/chat.js"></script>
+<script src="/assets/js/calls.js"></script>
+<script src="/assets/js/tearsheet.js"></script>
 <script src="/assets/js/company.js"></script>
 </body>
 </html>

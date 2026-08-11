@@ -12,12 +12,12 @@ import statistics
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import calls, promessas  # noqa: F401  (rotas abaixo)
+from . import call_analise, calls, promessas  # noqa: F401  (rotas abaixo)
 from . import (agents, b3data, bdrs, cache, cvm, docs, etfs, ipe, market, metrics,
-               regime, scoring, universe, valuation)
+               regime, scoring, universe, valuation, xlsx_dcf)
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
 
 app = FastAPI(title="Gab's FinLab", version="2.0", docs_url="/api/docs")
@@ -232,9 +232,15 @@ def api_config():
     }
 
 
+# Placar de promessas — DEPRECATED na interface (redesenho): a página da
+# empresa não mostra nem cadastra mais promessas. Os endpoints continuam de
+# pé porque (1) a mesa de IA segue lendo o placar e registrando promessas
+# extraídas dos documentos com gate humano no chat, e (2) instalações
+# existentes têm dados em data/promessas.json que NUNCA são apagados.
+
 @app.get("/api/company/{ticker}/promessas")
 def api_promessas(ticker: str):
-    """Placar de promessas da gestão para este ticker."""
+    """Placar de promessas da gestão (deprecated na UI; a mesa ainda lê)."""
     return promessas.placar(_ticker_valido(ticker))
 
 
@@ -266,38 +272,94 @@ def api_promessa_remover(ticker: str, promessa_id: str):
 
 @app.get("/api/company/{ticker}/calls")
 def api_calls(ticker: str):
-    """Transcrições de teleconferência já indexadas para este ticker."""
-    comp = universe.get(_ticker_valido(ticker))
-    return {"calls": calls.listar(comp.cd_cvm) if comp else []}
+    """Calls indexadas, com a análise cacheada de cada uma (nunca chama o
+    LLM aqui): nota, campos do resumo, rótulo e a posição na tela."""
+    tk = _ticker_valido(ticker)
+    comp = universe.get(tk)
+    lista = call_analise.com_analise(tk, calls.listar(comp.cd_cvm)) if comp else []
+    return {"calls": lista}
 
 
 @app.post("/api/company/{ticker}/calls")
 def api_call_nova(ticker: str, body: dict = Body(...)):
-    """Indexa uma transcrição colada pelo usuário.
+    """Indexa uma transcrição e dispara a análise do agente de contexto.
 
     O painel não transcreve: de onde veio o texto — ASR local, serviço pago
     ou o site de RI — é escolha de quem usa. Aqui ele é segmentado em pares
-    pergunta→resposta e entra no MESMO índice dos documentos da CVM, então a
-    mesa passa a citá-lo com data e `doc ID` como qualquer outro.
+    pergunta→resposta, entra no MESMO índice dos documentos da CVM e, com um
+    provedor configurado no navegador (o `slot` viaja no corpo, a chave nunca
+    fica no servidor), UMA chamada ao LLM devolve o resumo estruturado — que
+    é validado em código e cacheado em `data/calls/`. Sem provedor, a call
+    entra no índice sem análise, com a mensagem certa para a tela.
     """
-    comp = universe.get(_ticker_valido(ticker))
+    tk = _ticker_valido(ticker)
+    comp = universe.get(tk)
     if comp is None or not comp.cd_cvm:
         raise HTTPException(status_code=400,
                             detail="Empresa sem código CVM — não dá para indexar.")
+    body = body or {}
+    texto = body.get("texto") or ""
     try:
-        return calls.indexar(comp.cd_cvm, (body or {}).get("data") or "",
-                             (body or {}).get("texto") or "",
-                             (body or {}).get("titulo") or "",
-                             (body or {}).get("link") or "")
+        info = calls.indexar(comp.cd_cvm, body.get("data") or "", texto,
+                             body.get("titulo") or "", body.get("link") or "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    registro = _analisa_call(tk, info, body.get("titulo") or "",
+                             calls.segmentar(texto), body.get("slot") or {})
+    call_analise.gravar(tk, registro)
+    call_analise.regenerar_md(tk, comp.cd_cvm,
+                              call_analise.com_analise(tk, calls.listar(comp.cd_cvm)))
+    return {**info, "rotulo": registro["rotulo"], "analise": registro["analise"],
+            "mensagem": registro["mensagem"]}
+
+
+def _analisa_call(ticker: str, info: dict, titulo: str, seg: dict,
+                  slot: dict) -> dict:
+    """A análise 4.2, com a degradação declarada: sem slot → sem análise e a
+    mensagem de configurar provedor; erro do provedor → sem análise e o erro."""
+    rotulo = call_analise.rotulo_da_call(info["data"], titulo)
+    api_key = (slot.get("api_key") or "").strip()
+    model = (slot.get("model") or "").strip()
+    if not api_key or not model:
+        return call_analise.registro_novo(info["protocolo"], info["data"], titulo,
+                                          None, call_analise.SEM_PROVEDOR)
+    try:
+        analise = call_analise.analisar(
+            {"provider": slot.get("provider"), "api_key": api_key, "model": model},
+            rotulo, seg)
+        return call_analise.registro_novo(info["protocolo"], info["data"], titulo,
+                                          analise, None, model)
+    except (agents.LLMError, ValueError) as exc:
+        return call_analise.registro_novo(
+            info["protocolo"], info["data"], titulo, None,
+            f"A análise falhou: {exc} A call ficou indexada; envie de novo "
+            "para tentar a análise outra vez.")
+
+
+@app.get("/api/company/{ticker}/calls.md")
+def api_calls_md(ticker: str):
+    """O arquivo de histórico — a projeção canônica do cache, completa."""
+    tk = _ticker_valido(ticker)
+    caminho = call_analise.caminho_md(tk)
+    if not caminho.exists():
+        raise HTTPException(status_code=404,
+                            detail="Ainda não há arquivo de calls para este ticker.")
+    return Response(content=caminho.read_text(encoding="utf-8"),
+                    media_type="text/markdown; charset=utf-8")
 
 
 @app.delete("/api/company/{ticker}/calls/{protocolo}")
 def api_call_remover(ticker: str, protocolo: str):
-    comp = universe.get(_ticker_valido(ticker))
+    tk = _ticker_valido(ticker)
+    comp = universe.get(tk)
     if comp is None or not calls.remover(comp.cd_cvm, protocolo):
         raise HTTPException(status_code=404, detail="Transcrição não encontrada.")
+    # Remover uma call é correção de engano (transcrição errada, data trocada):
+    # o cache dela sai e o arquivo é regenerado a partir do que sobrou.
+    call_analise.apagar(tk, protocolo)
+    call_analise.regenerar_md(tk, comp.cd_cvm,
+                              call_analise.com_analise(tk, calls.listar(comp.cd_cvm)))
     return {"ok": True}
 
 
@@ -378,11 +440,42 @@ def api_company(ticker: str):
                 "trimestral": cvm.dre_trimestral(comp.cd_cvm)},
         "ipe": ipe.documentos(comp.cd_cvm),
         "docs": docs.stats(comp.cd_cvm),
-        "calls": calls.listar(comp.cd_cvm),
+        "calls": call_analise.com_analise(ticker, calls.listar(comp.cd_cvm)),
         "promessas": promessas.placar(ticker),
         "regime": reg,
         "source": snap.get("price_source"),
     }
+
+
+@app.get("/api/company/{ticker}/dcf.xlsx")
+def api_company_dcf_xlsx(ticker: str):
+    """A planilha DCF do redesenho (spec 4.1): dados do painel preenchidos,
+    premissas em 3 cenários e só fórmulas nos resultados. A página não calcula
+    mais preço justo — quem simula é o usuário, no Excel."""
+    ticker = ticker.upper().strip()
+    comp = universe.get(ticker)
+    if comp is None:
+        raise HTTPException(status_code=404,
+                            detail=f"Planilha disponível só para as ações da B3 do universo: {ticker}")
+    fund = _fundamentals(ticker)
+    if not fund:
+        raise HTTPException(status_code=404, detail=f"Sem dados para {ticker}")
+
+    series = market.price_series([ticker]).get(ticker, [])
+    brapi = market.brapi_fundamentals(ticker) or market.brapi_quotes([ticker]).get(ticker)
+    snap = metrics.market_snapshot(ticker, series, brapi, fund)
+    reg = regime.classificar(fund)
+    prem = valuation.assumptions(fund, snap, market.macro(), brapi, reg=reg)
+
+    try:
+        blob = xlsx_dcf.planilha(ticker, prem, fund)
+    except xlsx_dcf.SemDados as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return Response(
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{ticker}-DCF.xlsx"'})
 
 
 def _consenso(brapi: Optional[dict]) -> dict:

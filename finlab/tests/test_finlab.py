@@ -3016,3 +3016,313 @@ def test_cagr_recusa_sinal_trocado():
     assert cvm._cagr([100.0, -20.0], 1) is None
     assert cvm._cagr([None, 100.0], 1) is None
     assert cvm._cagr([], 5) is None
+
+
+# ---------------------------------------------------------------------------
+# Planilha DCF exportada (spec 4.1 do redesenho)
+# ---------------------------------------------------------------------------
+
+def _prem_planilha(**sobrepor):
+    """Premissas mínimas no formato de valuation.assumptions — valores em R$
+    (a planilha converte para milhões)."""
+    prem = {
+        "fcf_media3": 4.8e9, "fcf_ultimo": 5.6e9,
+        "divida_liquida": -3.1e9,
+        "shares": 4.196e9, "preco": 41.20,
+        "growth": [0.12, 0.105, 0.09, 0.08, 0.07], "g_terminal": 0.05,
+        "rf": 0.131, "rf_fonte": "ANBIMA · prefixado ~10 anos",
+        "beta": 0.72, "erp": 0.045, "premio_extra": 0.0,
+        "spread_credito": 0.015, "wd": 0.05, "tax": 0.20, "wacc": 0.16,
+    }
+    prem.update(sobrepor)
+    return prem
+
+
+def _abrir_planilha(blob):
+    import io
+    from openpyxl import load_workbook
+    return load_workbook(io.BytesIO(blob))
+
+
+def test_planilha_dcf_tem_formulas_vivas_e_nunca_resultado_pronto():
+    """A regra central do endpoint: resultado é SEMPRE fórmula. Se a planilha
+    trouxesse números calculados em Python, um bug de conta ficaria escondido
+    atrás de um valor que parece certo."""
+    from finlab.backend import xlsx_dcf
+
+    blob = xlsx_dcf.planilha("WEGE3", _prem_planilha(),
+                             {"last_year": 2025, "financial": False})
+    wb = _abrir_planilha(blob)
+    ws = wb["DCF"]
+
+    # custo de capital e WACC, célula a célula como no arquivo de referência
+    assert ws["B29"].value == "=B20+B21*B22+B23"
+    assert ws["C30"].value == "=(C20+C24)*(1-C26)"
+    assert ws["D31"].value == "=D29*(1-D25)+D30*D25"
+
+    # projeção encadeada e valor presente
+    assert ws["C34"].value == "=C13*(1+C14)"
+    assert ws["C38"].value == "=C37*(1+C18)"
+    assert ws["B41"].value == "=B34/(1+B$31)^1"
+    assert ws["D45"].value == "=D38/(1+D$31)^5"
+    assert ws["C46"].value == "=SUM(C41:C45)"
+
+    # a guarda de Gordon: WACC ≤ g devolve "n/a", não um número sem sentido
+    assert ws["C47"].value == '=IF(C31<=C19,"n/a",C38*(1+C19)/(C31-C19))'
+    assert ws["C53"].value == '=IF(ISNUMBER(C51),C51/$B$9,"n/a")'
+    assert ws["B54"].value == '=IF(ISNUMBER(B53),B53/$B$10-1,"n/a")'
+
+    # nenhuma célula de resultado (linhas 29–54) veio como número pronto
+    for linha in range(29, 55):
+        for col in ("B", "C", "D"):
+            v = ws[f"{col}{linha}"].value
+            if v is not None:
+                assert str(v).startswith("="), f"{col}{linha} veio calculado: {v}"
+
+
+def test_planilha_dcf_dados_do_painel_e_tres_cenarios():
+    from finlab.backend import xlsx_dcf
+
+    blob = xlsx_dcf.planilha("WEGE3", _prem_planilha(),
+                             {"last_year": 2025, "financial": False})
+    ws = _abrir_planilha(blob)["DCF"]
+
+    # dados do painel em R$ milhões, com a célula de fonte ao lado
+    assert ws["B6"].value == 4800
+    assert ws["B7"].value == 5600
+    assert ws["B8"].value == -3100
+    assert ws["B9"].value == 4196
+    assert ws["B10"].value == 41.20
+    assert "DFC da CVM 2023–2025" in str(ws["C6"].value)
+
+    # três cenários: pessimista < mediana < otimista no crescimento e no g
+    assert ws["B12"].value == "Pessimista"
+    assert ws["C12"].value == "Mediana"
+    assert ws["D12"].value == "Otimista"
+    assert ws["C14"].value == pytest.approx(0.12)
+    assert ws["B14"].value < ws["C14"].value < ws["D14"].value
+    assert ws["B19"].value < ws["C19"].value < ws["D19"].value
+    assert ws["C19"].value == pytest.approx(0.05)
+    # beta pessimista é o MAIOR (mais desconto), como no arquivo de referência
+    assert ws["B21"].value > ws["C21"].value > ws["D21"].value
+    # FCL base igual nos três: o cenário mexe em crescimento e risco
+    assert ws["B13"].value == ws["C13"].value == ws["D13"].value == 4800
+
+    # células editáveis marcadas (fundo amarelo), dado do painel em cinza
+    assert ws["C14"].fill.start_color.rgb == "FFFFFF00"
+    assert ws["B6"].fill.start_color.rgb == "FFF2F2F2"
+    assert ws["C14"].font.color.rgb == "FF0000FF"
+    assert ws["A1"].font.name == "Arial"
+
+
+def test_planilha_dcf_sensibilidade_referencia_os_fluxos_da_mediana():
+    from finlab.backend import xlsx_dcf
+
+    blob = xlsx_dcf.planilha("WEGE3", _prem_planilha(),
+                             {"last_year": 2025, "financial": False})
+    wb = _abrir_planilha(blob)
+    assert "Sensibilidade" in wb.sheetnames
+    ws = wb["Sensibilidade"]
+
+    # grade centrada no painel: WACC 16% ± 3 p.p., g 5% ± 2 p.p.
+    assert ws["A4"].value == "WACC \\ g"
+    assert ws["B4"].value == pytest.approx(0.03)
+    assert ws["F4"].value == pytest.approx(0.07)
+    assert ws["A5"].value == pytest.approx(0.13)
+    assert ws["A11"].value == pytest.approx(0.19)
+
+    celula = str(ws["B5"].value)
+    assert celula.startswith('=IF($A5<=B$4,"n/a"')
+    assert "DCF!$C$34/(1+$A5)^1" in celula
+    assert "DCF!$C$38*(1+B$4)/($A5-B$4)/(1+$A5)^5" in celula
+    assert celula.endswith("-DCF!$B$8)/DCF!$B$9)")
+
+
+def test_planilha_dcf_recusa_financeira_e_falta_de_dado():
+    from finlab.backend import xlsx_dcf
+
+    with pytest.raises(xlsx_dcf.SemDados, match="financeira"):
+        xlsx_dcf.planilha("ITUB4", _prem_planilha(), {"financial": True})
+
+    with pytest.raises(xlsx_dcf.SemDados, match="fluxo de caixa"):
+        xlsx_dcf.planilha("XPTO3", _prem_planilha(fcf_media3=None, fcf_ultimo=None),
+                          {"financial": False})
+
+    with pytest.raises(xlsx_dcf.SemDados, match="ações"):
+        xlsx_dcf.planilha("XPTO3", _prem_planilha(shares=None, shares_emitidas=None),
+                          {"financial": False})
+
+    with pytest.raises(xlsx_dcf.SemDados, match="cotação"):
+        xlsx_dcf.planilha("XPTO3", _prem_planilha(preco=None),
+                          {"financial": False})
+
+    # só a média disponível: o último exercício cai para ela, e vice-versa
+    blob = xlsx_dcf.planilha("XPTO3", _prem_planilha(fcf_ultimo=None),
+                             {"financial": False})
+    ws = _abrir_planilha(blob)["DCF"]
+    assert ws["B7"].value == ws["B6"].value == 4800
+
+
+# ---------------------------------------------------------------------------
+# Análise de call pelo agente de contexto (spec 4.2/4.4 do redesenho)
+# ---------------------------------------------------------------------------
+
+def test_rotulo_da_call_prioriza_titulo_e_cai_no_calendario():
+    """O rótulo XTXX identifica a call no arquivo e nas citações. O título
+    manda; sem ele, vale o calendário de resultados: a call divulga o
+    trimestre ANTERIOR à sua data — confere com o arquivo de referência."""
+    from finlab.backend import call_analise as ca
+
+    assert ca.rotulo_da_call("2026-08-07", "Call do 3T26") == "3T26"
+    # heurística: agosto→2T, maio→1T, fevereiro→4T do ano anterior…
+    assert ca.rotulo_da_call("2026-08-07") == "2T26"
+    assert ca.rotulo_da_call("2026-05-08") == "1T26"
+    assert ca.rotulo_da_call("2026-02-27") == "4T25"
+    assert ca.rotulo_da_call("2025-10-30") == "3T25"
+    assert ca.rotulo_da_call("2025-07-31") == "2T25"
+
+
+def test_analise_de_call_valida_em_codigo_nao_no_prompt(monkeypatch):
+    """O modelo pode devolver nota inventada e âncora que não existe — quem
+    barra é o validador, não a instrução. Só âncoras da transcrição passam."""
+    from finlab.backend import call_analise as ca, calls as bcalls
+
+    seg = bcalls.segmentar(_CALL)
+    resposta = {
+        "nota": "ÓTIMA",                        # fora do conjunto → None
+        "entregue": "margem de 34%, recorde",
+        "devendo": None,
+        "preocupacao": "prazo da desalavancagem",
+        "motivo": "a call não menciona promessas anteriores",
+        "trechos": ["2T26#qa-01", "2T26#qa-99", "outra-call#qa-01", 123],
+    }
+    monkeypatch.setattr(ca.agents, "chat",
+                        lambda *a, **k: "```json\n" + json.dumps(resposta) + "\n```")
+
+    analise = ca.analisar({"provider": "openrouter", "api_key": "k",
+                           "model": "m"}, "2T26", seg)
+    assert analise["nota"] is None
+    assert analise["entregue"] == "margem de 34%, recorde"
+    assert analise["devendo"] is None
+    assert analise["motivo"] == "a call não menciona promessas anteriores"
+    # só a âncora que EXISTE sobreviveu
+    assert analise["trechos"] == ["2T26#qa-01"]
+
+    # resposta sem JSON nenhum → ValueError (o chamador guarda o erro)
+    monkeypatch.setattr(ca.agents, "chat", lambda *a, **k: "não sei responder")
+    with pytest.raises(ValueError):
+        ca.analisar({"provider": "openrouter", "api_key": "k", "model": "m"},
+                    "2T26", seg)
+
+
+def test_call_com_slot_analisa_cacheia_e_regenera_o_md(tmp_path, monkeypatch):
+    """O fluxo inteiro da rota: indexa, UMA chamada ao provedor, cache em
+    data/calls/, e o {ticker}-calls.md regenerado com o formato do arquivo
+    de referência — e indexado para a mesa citar [call:XTXX]."""
+    from finlab.backend import app as bapp, call_analise as ca, docs as bdocs
+
+    monkeypatch.setattr(bdocs, "DB_PATH", tmp_path / "docs.sqlite")
+    monkeypatch.setattr(ca, "DIR_CALLS", tmp_path / "calls")
+
+    chamadas = []
+
+    def fake_chat(provider, api_key, model, system, user, **kw):
+        chamadas.append({"system": system, "user": user})
+        return json.dumps({
+            "nota": "positiva",
+            "entregue": "margem de 34%, recorde da companhia",
+            "devendo": "capex de 2027 sem detalhamento",
+            "preocupacao": "prazo para desalavancar até 2,0x; resposta com data (4T27)",
+            "motivo": None,
+            "trechos": ["2T26#qa-01"],
+        })
+    monkeypatch.setattr(ca.agents, "chat", fake_chat)
+
+    r = bapp.api_call_nova("WEGE3", {
+        "data": "2026-08-07", "texto": _CALL, "titulo": "Call do 2T26",
+        "slot": {"provider": "openrouter", "api_key": "k", "model": "m"},
+    })
+    assert r["rotulo"] == "2T26"
+    assert r["analise"]["nota"] == "positiva"
+    assert len(chamadas) == 1
+    # o critério fixo da nota viaja no prompt — é ele que torna calls comparáveis
+    assert "ENTREGOU o que havia prometido" in chamadas[0]["system"]
+    assert "2T26#qa-01" in chamadas[0]["user"]
+
+    # cache em disco: navegar entre calls nunca chama o LLM de novo
+    reg = ca.carregar("WEGE3", "call-2026-08-07")
+    assert reg["analise"]["nota"] == "positiva"
+    lista = bapp.api_calls("WEGE3")["calls"]
+    assert lista[0]["nota"] == "positiva" and lista[0]["na_tela"] is True
+    assert len(chamadas) == 1, "listar chamou o LLM"
+
+    # o arquivo canônico, no formato de referência
+    md = ca.caminho_md("WEGE3").read_text(encoding="utf-8")
+    assert "# WEGE3 · Arquivo de calls" in md
+    assert "## [call:2T26] — 07/08/2026 · nota: **POSITIVA** · na tela" in md
+    assert "**Entregue:** margem de 34%" in md
+    assert "`2T26#qa-01`" in md
+
+    # e a mesa recupera a ANÁLISE pelo índice, com o marcador [call:XTXX]
+    achados = bdocs.search(universe.get("WEGE3").cd_cvm, "capex 2027 sem detalhamento")
+    assert any("[call:2T26]" in a["trecho"] for a in achados)
+
+
+def test_call_sem_provedor_degrada_e_arquiva_na_quarta(tmp_path, monkeypatch):
+    """Sem slot, a call entra no índice sem análise — com a mensagem certa.
+    E a 4ª call empurra a mais antiga para fora da tela, com a data de
+    arquivamento = a data da call que a empurrou (regra do arquivo)."""
+    from finlab.backend import app as bapp, call_analise as ca, docs as bdocs
+
+    monkeypatch.setattr(bdocs, "DB_PATH", tmp_path / "docs.sqlite")
+    monkeypatch.setattr(ca, "DIR_CALLS", tmp_path / "calls")
+
+    datas = ["2025-10-30", "2026-02-27", "2026-05-08", "2026-08-07"]
+    for d in datas[:3]:
+        r = bapp.api_call_nova("WEGE3", {"data": d, "texto": _CALL})
+        assert r["analise"] is None
+        assert "provedor" in r["mensagem"].lower()
+
+    lista = bapp.api_calls("WEGE3")["calls"]
+    assert [c["na_tela"] for c in lista] == [True, True, True]
+
+    bapp.api_call_nova("WEGE3", {"data": datas[3], "texto": _CALL})
+    lista = bapp.api_calls("WEGE3")["calls"]
+    assert [c["rotulo"] for c in lista] == ["2T26", "1T26", "4T25", "3T25"]
+    assert [c["na_tela"] for c in lista] == [True, True, True, False]
+    # 3T25 saiu quando a 2T26 entrou: arquivada na data DELA
+    assert lista[3]["arquivada_em"] == "2026-08-07"
+
+    md = ca.caminho_md("WEGE3").read_text(encoding="utf-8")
+    assert "## [call:3T25] — 30/10/2025 · nota: **SEM ANÁLISE** · " \
+           "arquivada da tela em 07/08/2026" in md
+    assert md.count("## [call:") == 4, "o arquivo tem de guardar TODAS as calls"
+
+    # remover por engano: o cache sai e o arquivo é regenerado sem a call
+    bapp.api_call_remover("WEGE3", "call-2026-08-07")
+    md = ca.caminho_md("WEGE3").read_text(encoding="utf-8")
+    assert md.count("## [call:") == 3
+    assert ca.carregar("WEGE3", "call-2026-08-07") is None
+
+
+def test_erro_do_provedor_nao_perde_a_call(tmp_path, monkeypatch):
+    """Provedor fora do ar no meio do upload: a transcrição fica indexada e a
+    mensagem explica — nunca um 500 que joga o trabalho fora."""
+    from finlab.backend import agents as bagents, app as bapp
+    from finlab.backend import call_analise as ca, docs as bdocs
+
+    monkeypatch.setattr(bdocs, "DB_PATH", tmp_path / "docs.sqlite")
+    monkeypatch.setattr(ca, "DIR_CALLS", tmp_path / "calls")
+
+    def explode(*a, **k):
+        raise bagents.LLMError("Chave de API rejeitada (401).")
+    monkeypatch.setattr(ca.agents, "chat", explode)
+
+    r = bapp.api_call_nova("WEGE3", {
+        "data": "2026-08-07", "texto": _CALL,
+        "slot": {"provider": "openrouter", "api_key": "ruim", "model": "m"},
+    })
+    assert r["analise"] is None
+    assert "401" in r["mensagem"]
+    assert [c["protocolo"] for c in bapp.api_calls("WEGE3")["calls"]] \
+        == ["call-2026-08-07"]
