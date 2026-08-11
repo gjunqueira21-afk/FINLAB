@@ -821,6 +821,137 @@
     }
   }
 
+  /* ============================== football field do tear sheet (redesenho) == */
+
+  /**
+   * As referências de valor num eixo de preço só — sem motor de cálculo por
+   * trás. Difere do `hbars` em três coisas que o redesenho pede: a linha
+   * "Seu DCF" tem um ESTADO VAZIO (trilho tracejado convidando a exportar a
+   * planilha), a faixa mostra o min–max escrito na ponta, e o preço de tela
+   * é sempre a referência âmbar tracejada.
+   *
+   * opts:
+   *   items: [{ label, from, to, point, color, forte, vazio, vazioTexto }]
+   *   ref:   { value, label }              preço de tela (âmbar)
+   *   format(v), ariaLabel
+   */
+  function footballField(container, opts) {
+    if (!container) return;
+    const o = opts || {};
+    const items = (o.items || []).filter(
+      (i) => i.vazio || (isNum(i.from) && isNum(i.to)));
+    if (!items.length) { container.innerHTML = ''; return; }
+
+    const linha = 38;
+    const height = 14 + items.length * linha + 22;
+    const { svg, width } = frame(container, Object.assign({}, o, { height }));
+    // Piso de 150px: "Seu DCF · da planilha" (o rótulo mais longo do
+    // redesenho) cabe inteiro em desktop; em tela estreita o teto de 34%
+    // da largura volta a mandar e o rótulo encurta com reticências.
+    const rot = margemRotulos(items.map((i) => i.label), width, 150);
+    const pad = { t: 10, r: 10, b: 22, l: rot.pad };
+    const R = width - pad.r;
+    const fmtV = (v) => (o.format ? o.format(v) : String(v));
+
+    const vals = [];
+    if (o.ref && isNum(o.ref.value)) vals.push(o.ref.value);
+    items.forEach((i) => {
+      if (i.vazio) return;
+      vals.push(i.from, i.to);
+      if (isNum(i.point)) vals.push(i.point);
+    });
+    let min = vals.length ? Math.min.apply(null, vals) : 0;
+    let max = vals.length ? Math.max.apply(null, vals) : 1;
+    const folga = (max - min) * 0.10 || Math.max(1, Math.abs(max) * 0.1);
+    min -= folga; max += folga;
+    const X = (v) => pad.l + ((v - min) / (max - min)) * (R - pad.l);
+
+    items.forEach((it, i) => {
+      const y = pad.t + i * linha + linha / 2;
+      const cor = it.color || COLORS.brand;
+
+      const lbl = el('text', {
+        x: pad.l - 12, y: y + 3, 'text-anchor': 'end', 'font-size': 11,
+        fill: it.forte ? '#E6ECF5' : COLORS.text,
+        'font-weight': it.forte ? 700 : 400,
+        'font-family': 'ui-monospace, monospace'
+      });
+      lbl.textContent = corta(it.label, rot.max);
+      lbl.appendChild(el('title')).textContent = it.label;
+      svg.appendChild(lbl);
+
+      svg.appendChild(el('line', {
+        x1: pad.l, x2: R, y1: y, y2: y,
+        stroke: 'rgba(126,150,190,.14)', 'stroke-width': 1
+      }));
+
+      // Sem faixa ainda: o trilho tracejado é o convite, não um erro.
+      if (it.vazio) {
+        svg.appendChild(el('rect', {
+          x: pad.l + 14, y: y - 8, width: Math.max(40, R - pad.l - 28),
+          height: 16, rx: 8, fill: 'none',
+          stroke: 'rgba(103,232,249,.35)', 'stroke-width': 1.2,
+          'stroke-dasharray': '5 5'
+        }));
+        const convite = el('text', {
+          x: (pad.l + R) / 2, y: y + 3.5, 'text-anchor': 'middle',
+          'font-size': 10, fill: '#5A6B87', 'font-style': 'italic',
+          'font-family': 'ui-monospace, monospace'
+        });
+        convite.textContent = corta(
+          it.vazioTexto || 'exporte a planilha, simule, e traga a faixa para cá',
+          Math.floor((R - pad.l - 30) / CHAR_W));
+        svg.appendChild(convite);
+        return;
+      }
+
+      const a = X(Math.min(it.from, it.to));
+      const b = X(Math.max(it.from, it.to));
+      svg.appendChild(el('rect', {
+        x: a, y: y - 7, width: Math.max(2, b - a), height: 14, rx: 7,
+        fill: cor, opacity: it.forte ? 0.34 : 0.24
+      }));
+      svg.appendChild(el('rect', { x: a, y: y - 7, width: 2.5, height: 14, fill: cor }));
+      svg.appendChild(el('rect', { x: b - 2.5, y: y - 7, width: 2.5, height: 14, fill: cor }));
+      if (isNum(it.point)) {
+        svg.appendChild(el('circle', {
+          cx: X(it.point), cy: y, r: 5,
+          fill: cor, stroke: '#070B14', 'stroke-width': 1.6
+        }));
+      }
+
+      const texto = fmtV(it.from) + ' – ' + fmtV(it.to);
+      const cabe = b + 10 + texto.length * CHAR_W <= R;
+      const faixa = el('text', {
+        x: cabe ? b + 10 : Math.max(pad.l, a - 10), y: y + 3.5,
+        'font-size': 10, fill: '#E6ECF5',
+        'text-anchor': cabe ? 'start' : 'end',
+        'font-family': 'ui-monospace, monospace'
+      });
+      faixa.textContent = texto;
+      svg.appendChild(faixa);
+    });
+
+    // O preço de tela atravessa tudo — é contra ele que as faixas se leem.
+    if (o.ref && isNum(o.ref.value)) {
+      const x = X(o.ref.value);
+      svg.appendChild(el('line', {
+        x1: x, x2: x, y1: 4, y2: height - 18,
+        stroke: '#F5B841', 'stroke-width': 1.5, 'stroke-dasharray': '4 4'
+      }));
+      const texto = o.ref.label || fmtV(o.ref.value);
+      const larg = texto.length * CHAR_W;
+      const lb = el('text', {
+        x: Math.max(4 + larg / 2, Math.min(x, width - 4 - larg / 2)),
+        y: height - 4, 'text-anchor': 'middle',
+        'font-size': 10.5, 'font-weight': 700, fill: '#F5B841',
+        'font-family': 'ui-monospace, monospace'
+      });
+      lb.textContent = texto;
+      svg.appendChild(lb);
+    }
+  }
+
   /* ============================================================= dot plot == */
 
   /**
@@ -1150,6 +1281,7 @@
     container.appendChild(bar);
   }
 
-  global.FLChart = { line, bars, spark, ring, heat, stack, hbars, dots, waterfall, tornado,
+  global.FLChart = { line, bars, spark, ring, heat, stack, hbars, footballField,
+                     dots, waterfall, tornado,
                      niceTicks, observarLargura, COLORS };
 })(window);

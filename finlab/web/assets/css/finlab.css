@@ -1013,3 +1013,36 @@ thead .col-ltm { color: var(--brand); }
    número e todo fato tenham caminho de volta à fonte. */
 .ipe-assunto { color: var(--dim); text-decoration: none; border-bottom: 1px dotted var(--line2); }
 a.ipe-assunto:hover { color: var(--brand); border-bottom-color: var(--brand); }
+
+/* --------------------- "Quanto vale, afinal" · football + Seu DCF (3.2) */
+.valgrid { display: grid; gap: 18px; }
+@media (min-width: 980px) { .valgrid { grid-template-columns: 1fr 320px; align-items: start; } }
+.valgrid .chartbox { min-width: 0; }
+.dcfcard {
+  border: 1px solid var(--line2); border-radius: var(--r);
+  background: linear-gradient(180deg, var(--panel2) 0%, var(--panel) 100%);
+  padding: 14px 15px;
+}
+.dcfcard h3 {
+  font: 700 10px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 4px;
+}
+.dcfcard .why { font: 400 11px/1.55 var(--sans); color: var(--dim); margin-bottom: 12px; }
+.dcfcard .why b { color: var(--paper); }
+.frow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.fld .l {
+  font: 700 8.5px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--dim2); margin-bottom: 4px;
+}
+.fld input {
+  width: 100%; min-height: 36px; padding: 7px 9px;
+  font: 700 13px var(--mono); color: var(--paper);
+  background: var(--ink2); border: 1px solid var(--line2); border-radius: var(--r-sm);
+}
+.fld input::placeholder { color: var(--dim2); font-weight: 500; }
+.fld.med input { border-color: rgba(103, 232, 249, .5); }
+.dcfmsg { font: 400 10px/1.5 var(--mono); color: var(--dim2); margin-top: 9px; }
+.dcfmsg.err { color: var(--amber); }
+.dcfmsg b { color: var(--paper); }
+.dcfbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.exportline { border-top: 1px dashed var(--line); margin-top: 13px; padding-top: 12px; }

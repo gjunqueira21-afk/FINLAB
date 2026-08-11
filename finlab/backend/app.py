@@ -12,12 +12,12 @@ import statistics
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import calls, promessas  # noqa: F401  (rotas abaixo)
 from . import (agents, b3data, bdrs, cache, cvm, docs, etfs, ipe, market, metrics,
-               regime, scoring, universe, valuation)
+               regime, scoring, universe, valuation, xlsx_dcf)
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
 
 app = FastAPI(title="Gab's FinLab", version="2.0", docs_url="/api/docs")
@@ -383,6 +383,37 @@ def api_company(ticker: str):
         "regime": reg,
         "source": snap.get("price_source"),
     }
+
+
+@app.get("/api/company/{ticker}/dcf.xlsx")
+def api_company_dcf_xlsx(ticker: str):
+    """A planilha DCF do redesenho (spec 4.1): dados do painel preenchidos,
+    premissas em 3 cenários e só fórmulas nos resultados. A página não calcula
+    mais preço justo — quem simula é o usuário, no Excel."""
+    ticker = ticker.upper().strip()
+    comp = universe.get(ticker)
+    if comp is None:
+        raise HTTPException(status_code=404,
+                            detail=f"Planilha disponível só para as ações da B3 do universo: {ticker}")
+    fund = _fundamentals(ticker)
+    if not fund:
+        raise HTTPException(status_code=404, detail=f"Sem dados para {ticker}")
+
+    series = market.price_series([ticker]).get(ticker, [])
+    brapi = market.brapi_fundamentals(ticker) or market.brapi_quotes([ticker]).get(ticker)
+    snap = metrics.market_snapshot(ticker, series, brapi, fund)
+    reg = regime.classificar(fund)
+    prem = valuation.assumptions(fund, snap, market.macro(), brapi, reg=reg)
+
+    try:
+        blob = xlsx_dcf.planilha(ticker, prem, fund)
+    except xlsx_dcf.SemDados as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return Response(
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{ticker}-DCF.xlsx"'})
 
 
 def _consenso(brapi: Optional[dict]) -> dict:

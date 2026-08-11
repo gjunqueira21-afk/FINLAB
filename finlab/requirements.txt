@@ -9,6 +9,8 @@ python-dotenv>=1.0
 yfinance>=0.2.40
 # Texto dos PDFs: anexo do chat e leitura do índice de documentos (puro Python)
 pypdf>=4.0
+# Planilha DCF exportada (GET /api/company/{ticker}/dcf.xlsx)
+openpyxl>=3.1
 
 # Testes (opcional): python -m pytest finlab/tests -q
 pytest>=8.0
