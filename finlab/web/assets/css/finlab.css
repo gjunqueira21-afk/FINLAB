@@ -294,6 +294,23 @@ td.mut { color: var(--dim); }
   border-radius: 0 0 var(--r) var(--r); background: var(--panel); overflow: hidden;
 }
 .sector-body .table-wrap { padding: 0 4px 4px; }
+
+/* ------------------------------------------------- tabelas de DRE (tear sheet) */
+/* A margem mora numa linha própria, menor e mais apagada, logo abaixo do
+   resultado de onde ela sai — é assim que se lê uma DRE no papel, e evita
+   uma coluna a mais só para o percentual. */
+tr.mg td {
+  color: var(--dim2); font-size: 10.5px; padding-top: 0; padding-bottom: 7px;
+  border-bottom-style: dashed;
+}
+tr.tot td { border-top: 1px solid var(--line2); font-weight: 700; }
+tr.hero td { background: rgba(103, 232, 249, .05); }
+tr.hero td.left { color: var(--brand); font-weight: 700; }
+/* O Δ a/a vem SOB o valor, não numa coluna ao lado: a comparação pertence ao
+   número, e uma coluna extra por trimestre estouraria a largura. */
+td .dl { display: block; font: 500 9.5px/1.3 var(--mono); margin-top: 1px; }
+.colcagr { color: var(--brand2); }
+td.colcagr { font-weight: 600; }
 .sector-body th { background: var(--panel); top: 0; }
 
 .rank-cell { color: var(--dim2); font-size: 11px; width: 34px; }
