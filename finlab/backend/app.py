@@ -232,9 +232,15 @@ def api_config():
     }
 
 
+# Placar de promessas — DEPRECATED na interface (redesenho): a página da
+# empresa não mostra nem cadastra mais promessas. Os endpoints continuam de
+# pé porque (1) a mesa de IA segue lendo o placar e registrando promessas
+# extraídas dos documentos com gate humano no chat, e (2) instalações
+# existentes têm dados em data/promessas.json que NUNCA são apagados.
+
 @app.get("/api/company/{ticker}/promessas")
 def api_promessas(ticker: str):
-    """Placar de promessas da gestão para este ticker."""
+    """Placar de promessas da gestão (deprecated na UI; a mesa ainda lê)."""
     return promessas.placar(_ticker_valido(ticker))
 
 
