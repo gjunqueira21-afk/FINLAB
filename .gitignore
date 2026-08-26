@@ -28,3 +28,4 @@ valuation_cvm/data/raw/docs/
 .vscode/
 .idea/
 .DS_Store
+deploy/.env

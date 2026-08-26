@@ -1,0 +1,21 @@
+# O que NÃO entra na imagem do FinLab (deploy/Dockerfile).
+.git
+.venv
+venv
+**/__pycache__
+**/.pytest_cache
+*.py[cod]
+
+# Segredos e configuração local — nunca dentro da imagem
+.env
+finlab/.env
+valuation_cvm/.env
+deploy/.env
+
+# Caches e dados de execução: vivem nos volumes, não na imagem
+finlab/data/cache
+finlab/data/history.csv
+finlab/data/promessas.json
+finlab/data/calls
+valuation_cvm/data/raw
+valuation_cvm/data/processed/docs.sqlite
