@@ -35,7 +35,7 @@ YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
 HISTORY_FILE = DATA_DIR / "history.csv"
 
 _SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "GabsFinLab/1.0"})
+_SESSION.headers.update({"User-Agent": "FinLab/1.0"})
 
 
 # ---------------------------------------------------------------------------

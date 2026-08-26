@@ -1,4 +1,4 @@
-/* Gab's FinLab — gráficos em SVG puro.
+/* FinLab — gráficos em SVG puro.
    Zero dependências: o painel abre offline e o visual fica sob controle
    total do design system. O que sobrou depois do redesenho: linha/área
    (preço no ETF), anel de score (nota de saúde) e o football field do

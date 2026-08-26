@@ -544,7 +544,7 @@
   async function boot() {
     state.ticker = currentTicker();
     el('brand').innerHTML = window.FL.brandHeader('Análise da empresa · ' + state.ticker);
-    document.title = `${state.ticker} · Gab's FinLab`;
+    document.title = `${state.ticker} · FinLab`;
 
     try {
       const [uni, data] = await Promise.all([

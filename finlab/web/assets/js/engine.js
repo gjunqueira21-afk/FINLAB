@@ -1,4 +1,4 @@
-/* Gab's FinLab — motor de valuation (roda no navegador).
+/* FinLab — motor de valuation (roda no navegador).
 
    Convenções, todas explícitas na interface:
    • Fluxos anuais, desconto no fim do período: VP = FCF_t / (1+WACC)^t.

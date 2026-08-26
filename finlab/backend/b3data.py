@@ -32,7 +32,7 @@ TTL_BDI = 6 * 3600          # o boletim é D-1: 6h de cache bastam
 TTL_CADASTRO = 24 * 3600
 
 _SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "GabsFinLab/1.0"})
+_SESSION.headers.update({"User-Agent": "FinLab/1.0"})
 
 
 def _norm(s: object) -> str:

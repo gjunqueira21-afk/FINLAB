@@ -1,4 +1,4 @@
-# 🧠 Gab's FinLab
+# 🧠 FinLab
 
 Monitor fundamentalista e valuation interativo de ações da B3, sobre as demonstrações
 da CVM.

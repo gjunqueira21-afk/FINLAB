@@ -86,7 +86,7 @@ PROVIDERS = {
 # ---------------------------------------------------------------------------
 
 _COMUM = (
-    "Você faz parte da mesa de análise do Gab's FinLab, um painel de valuation de ativos "
+    "Você faz parte da mesa de análise do FinLab, um painel de valuation de ativos "
     "negociados na B3 — ações brasileiras e BDRs de empresas estrangeiras. Responda SEMPRE "
     "em português do Brasil, em tom técnico e direto, sem saudações e sem repetir os números "
     "que já estão na tela — interprete-os.\n"
@@ -853,7 +853,7 @@ def _cabecalho_openai(api_key: str) -> dict:
     return {"Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/gjunqueira21-afk/eps-value-dashboard-",
-            "X-Title": "Gab's FinLab"}
+            "X-Title": "FinLab"}
 
 
 def _chamada_openai(cfg: dict, api_key: str, model: str, temperature: float,

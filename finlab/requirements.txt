@@ -1,4 +1,4 @@
-# Gab's FinLab — backend
+# FinLab — backend
 fastapi>=0.110
 uvicorn[standard]>=0.27
 requests>=2.31
