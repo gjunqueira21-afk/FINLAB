@@ -743,7 +743,7 @@
   function analiseEmMarkdown(item) {
     const nomes = loadAgentNames();
     const linhas = [`# Análise da mesa — ${item.ticker || 'geral'}`,
-      `_${new Date(item.quando).toLocaleString('pt-BR')} · Gab's FinLab_`, ''];
+      `_${new Date(item.quando).toLocaleString('pt-BR')} · FinLab_`, ''];
     item.msgs.forEach((m) => {
       if (m.role === 'user') {
         linhas.push(`## Pergunta`, '', m.content, '');

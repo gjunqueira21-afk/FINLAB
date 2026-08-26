@@ -172,7 +172,7 @@ def planilha(ticker: str, prem: dict, fund: dict,
 
     # Cabeçalho -----------------------------------------------------------
     f.cel("A1", f"{ticker} · Modelo DCF", bold=True, size=14.0)
-    f.cel("A2", f"Exportado do Gab's FinLab em {data_str} · dados: DFP/ITR da "
+    f.cel("A2", f"Exportado do FinLab em {data_str} · dados: DFP/ITR da "
                 "CVM e mercado (BRAPI) · não é recomendação de investimento",
           size=9.0, cor=_CINZA_TXT)
     f.cel("A3", "Legenda: fundo amarelo + fonte azul = edite aqui · fonte "

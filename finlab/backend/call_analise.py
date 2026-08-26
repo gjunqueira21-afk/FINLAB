@@ -329,7 +329,7 @@ def regenerar_md(ticker: str, cd_cvm: str, lista_com_analise: list[dict]) -> Opt
 
     corpo = [
         f"# {ticker} · Arquivo de calls", "",
-        "> Gerado pelo agente de contexto do Gab's FinLab. **Este arquivo é a "
+        "> Gerado pelo agente de contexto do FinLab. **Este arquivo é a "
         "fonte canônica**: guarda", "> todas as calls já enviadas, da mais "
         "nova para a mais antiga — nada se apaga. O painel mostra",
         "> apenas as 3 do topo; a mesa de IA lê o arquivo inteiro e cita cada "

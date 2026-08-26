@@ -1,5 +1,5 @@
 @echo off
-REM Gab's FinLab - sobe o painel e abre no navegador.
+REM FinLab - sobe o painel e abre no navegador.
 setlocal
 
 cd /d "%~dp0.."
@@ -42,7 +42,7 @@ if errorlevel 1 (
 if "%FINLAB_PORT%"=="" set FINLAB_PORT=8777
 if "%FINLAB_HOST%"=="" set FINLAB_HOST=127.0.0.1
 
-echo -^> Gab's FinLab em http://%FINLAB_HOST%:%FINLAB_PORT%
+echo -^> FinLab em http://%FINLAB_HOST%:%FINLAB_PORT%
 echo    (para encerrar, feche esta janela ou pressione Ctrl+C)
 start "" "http://%FINLAB_HOST%:%FINLAB_PORT%"
 

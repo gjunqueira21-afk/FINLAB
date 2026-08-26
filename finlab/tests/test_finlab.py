@@ -1,4 +1,4 @@
-"""Testes do Gab's FinLab.
+"""Testes do FinLab.
 
 Rodar: python -m pytest finlab/tests -q
 

@@ -1,4 +1,4 @@
-# 🧠 Gab's FinLab
+# 🧠 FinLab
 
 Monitor fundamentalista e **valuation interativo** de ações da B3, construído sobre as
 demonstrações da CVM. Quatro telas:
@@ -31,7 +31,7 @@ Requer Python 3.10+ no PATH — no Windows, marque *"Add python.exe to PATH"* na
 instalação, senão o script avisa e para.
 
 No Windows, rode `finlab\criar_atalho.bat` uma vez para ganhar um atalho
-**Gab's FinLab** na área de trabalho, com o ícone do cérebro — daí em diante o
+**FinLab** na área de trabalho, com o ícone do cérebro — daí em diante o
 painel abre com dois cliques.
 
 ---

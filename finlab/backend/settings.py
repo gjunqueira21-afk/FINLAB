@@ -1,4 +1,4 @@
-"""Configuração central do Gab's FinLab.
+"""Configuração central do FinLab.
 
 Tudo que muda de máquina para máquina (token, caminhos, TTLs) fica aqui.
 Nenhum segredo é gravado no repositório: as chaves vêm de variáveis de

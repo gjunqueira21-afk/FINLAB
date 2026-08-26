@@ -20,7 +20,7 @@
   }
 
   function render(d) {
-    document.title = `${d.ticker} · Gab's FinLab`;
+    document.title = `${d.ticker} · FinLab`;
     const perf = d.perf || {};
 
     el('strip').appendChild(h('section', { class: 'panel tight' }, [

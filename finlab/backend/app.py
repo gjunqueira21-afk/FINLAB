@@ -1,4 +1,4 @@
-"""API do Gab's FinLab.
+"""API do FinLab.
 
 FastAPI fino: serve o front estático e devolve JSON. Todo o cálculo de
 valuation interativo acontece no navegador; aqui ficam coleta, normalização
@@ -20,7 +20,7 @@ from . import (agents, b3data, bdrs, cache, cvm, docs, etfs, ipe, market, metric
                regime, scoring, universe, valuation, xlsx_dcf)
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
 
-app = FastAPI(title="Gab's FinLab", version="2.0", docs_url="/api/docs")
+app = FastAPI(title="FinLab", version="2.0", docs_url="/api/docs")
 
 
 @app.middleware("http")
