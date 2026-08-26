@@ -1,0 +1,44 @@
+# FinLab na VPS: dois contêineres.
+#   finlab — o painel (uvicorn), só visível dentro desta rede
+#   caddy  — HTTPS automático (Let's Encrypt) + senha na frente de tudo
+# Configuração em deploy/.env (crie com instalar.sh; nunca vai para o git).
+name: finlab
+
+services:
+  finlab:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Parquets da CVM e caches: fora da imagem, para git pull + rebuild
+      # não jogar fora dados que levaram minutos para baixar.
+      - dados_cvm:/app/valuation_cvm/data
+      - dados_app:/app/finlab/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8777/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 600s   # a primeira carga da CVM demora
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificados Let's Encrypt
+      - caddy_config:/config
+    depends_on:
+      - finlab
+
+volumes:
+  dados_cvm:
+  dados_app:
+  caddy_data:
+  caddy_config:

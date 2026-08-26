@@ -1,0 +1,15 @@
+# Caddy na frente do FinLab: HTTPS automático (Let's Encrypt) + senha.
+# As variáveis vêm do deploy/.env — nada sensível fica neste arquivo.
+{
+	email {$ACME_EMAIL}
+}
+
+{$FINLAB_DOMINIO} {
+	encode gzip
+
+	basic_auth {
+		{$FINLAB_USUARIO} {$FINLAB_SENHA_HASH}
+	}
+
+	reverse_proxy finlab:8777
+}
