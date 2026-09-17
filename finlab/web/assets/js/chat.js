@@ -135,7 +135,69 @@
     if (!meu && Array.isArray(msg.promessas) && msg.promessas.length) {
       caixa.appendChild(cartaoPromessas(msg.promessas));
     }
+    if (!meu && msg.carteira && Array.isArray(msg.carteira.posicoes)) {
+      caixa.appendChild(cartaoCarteira(msg.carteira));
+    }
     return caixa;
+  }
+
+  /* Proposta de carteira da mesa: mesmo gate humano do reconciliador — o
+     cartão mostra a composição inteira (pesos, teses, regras) e SALVAR é um
+     clique do usuário. O POST valida tudo de novo no servidor (universo,
+     soma dos pesos, banda); erro volta para o próprio botão. */
+
+  function cartaoCarteira(prop) {
+    const pos = (prop.posicoes || []).filter((p) => p && p.ticker);
+    const regras = prop.regras || {};
+    const pesoPct = (v) => isNum(v) ? (v > 1 ? v : v * 100).toFixed(1) + '%' : '—';
+
+    const linhas = pos.map((p) => h('div', { class: 'linha' }, [
+      h('b', { class: 'tk' }, String(p.ticker).toUpperCase()),
+      h('span', { class: 'peso' }, pesoPct(Number(p.peso))),
+      h('span', { class: 'tese' }, p.tese || '')
+    ]));
+
+    const meta = [];
+    if (isNum(Number(regras.banda))) {
+      const b = Number(regras.banda);
+      meta.push(`banda de ${(b > 1 ? b : b * 100).toFixed(0)} p.p.`);
+    }
+    if (regras.macro) meta.push('macro: ' + regras.macro);
+    if (regras.micro) meta.push('micro: ' + regras.micro);
+
+    const botao = h('button', { class: 'btn primary sm' }, '💼 Salvar e acompanhar');
+    botao.addEventListener('click', async () => {
+      botao.disabled = true;
+      botao.innerHTML = '<span class="spinner"></span> salvando…';
+      try {
+        const c = await api('/api/carteiras', {
+          method: 'POST',
+          body: JSON.stringify({
+            nome: prop.nome, mandato: prop.mandato || '',
+            posicoes: pos, regras: regras, origem: 'mesa'
+          })
+        });
+        botao.replaceWith(h('a', {
+          class: 'btn primary sm', href: '/carteiras?id=' + encodeURIComponent(c.id)
+        }, '✓ salva — abrir carteira'));
+      } catch (err) {
+        botao.disabled = false;
+        botao.textContent = '💼 Salvar e acompanhar';
+        rodape.textContent = '⚠ ' + err.message;
+      }
+    });
+
+    const rodape = h('div', { class: 'dica' },
+      'Você decide: nada é acompanhado sem este clique. O painel valida '
+      + 'tickers e pesos ao salvar.');
+
+    return h('div', { class: 'chat-carteira' }, [
+      h('div', { class: 'tt' }, `Carteira proposta · ${prop.nome || 'sem nome'}`),
+      prop.mandato ? h('div', { class: 'mandato' }, prop.mandato) : null,
+      h('div', { class: 'grade' }, linhas),
+      meta.length ? h('div', { class: 'regras' }, meta.join(' · ')) : null,
+      botao, rodape
+    ]);
   }
 
   /* ------------------------------------------- a mesa fechando com um modelo */
@@ -511,13 +573,15 @@
       // substitui — mostrar os dois seria a mesma coisa duas vezes.
       const proposta = (fim && fim.proposta) || null;
       const promessas = (fim && fim.promessas) || null;
-      const exibivel = (proposta || promessas)
+      const carteira = (fim && fim.carteira) || null;
+      const exibivel = (proposta || promessas || carteira)
         ? definitivo.replace(/```json[\s\S]*?```/g, '').trim() || definitivo
         : definitivo;
       empilhar({ role: 'assistant', autor: rotulo, icone: icone, agente: agente,
                  modelo: (fim && fim.modelo) || (slot && slot.model),
                  uso: (fim && fim.uso) || null,
-                 proposta: proposta, promessas: promessas, content: exibivel });
+                 proposta: proposta, promessas: promessas, carteira: carteira,
+                 content: exibivel });
       return { texto: definitivo, uso: (fim && fim.uso) || null };
     } catch (err) {
       marca.remove();
@@ -526,6 +590,41 @@
         content: '⚠️ ' + err.message
       });
       return null;
+    }
+  }
+
+  /* Deep research pedido pelo nome ("deep research da WEGE3") com uma empresa
+     aberta: ao fim da rodada, a conversa inteira é arquivada em .md no
+     servidor — a pasta "deep empresas", que na VPS vive no volume de dados.
+     É o único conteúdo de chat que vai ao servidor, e só o texto das falas:
+     chave de API continua nunca saindo do navegador. */
+
+  function ehDeepResearch(texto) {
+    return /deep\s*research/i.test(texto || '');
+  }
+
+  async function arquivarDeep(pergunta, respostas) {
+    if (!state.ticker || !respostas.length) return;
+    const linhas = ['## Pergunta', '', pergunta, ''];
+    respostas.forEach((r) => {
+      linhas.push(`### ${agentIcon(r.agente)} ${r.nome || r.agente}`, '', r.texto, '');
+    });
+    try {
+      const resp = await api(`/api/company/${state.ticker}/deep`, {
+        method: 'POST',
+        body: JSON.stringify({ conteudo: linhas.join('\n'),
+                               titulo: pergunta.slice(0, 120) })
+      });
+      empilhar({
+        role: 'assistant', local: true,
+        content: `📁 Deep research arquivado no servidor: \`${resp.arquivo}\` `
+          + '(pasta "deep empresas").'
+      });
+    } catch (err) {
+      empilhar({
+        role: 'assistant', local: true,
+        content: '⚠️ A rodada terminou mas o arquivamento falhou: ' + err.message
+      });
     }
   }
 
@@ -568,10 +667,16 @@
     pintarAnexo();
     const comAnexo = anexo ? { anexo: anexo } : {};
 
+    const deep = ehDeepResearch(texto) && !!state.ticker;
+
     try {
       if (escolha !== 'mesa') {
-        await falar(escolha, nomes[escolha] || escolha, agentIcon(escolha), texto,
-          anterior, comAnexo);
+        const r = await falar(escolha, nomes[escolha] || escolha, agentIcon(escolha),
+          texto, anterior, comAnexo);
+        if (deep && r) {
+          await arquivarDeep(texto,
+            [{ agente: escolha, nome: nomes[escolha] || escolha, texto: r.texto }]);
+        }
       } else {
         // A rodada acontece em ondas, como na mesa: o Radar abre (o que ele
         // levanta chega aos outros cercado como não verificado), o corpo fala,
@@ -641,6 +746,10 @@
               + (custo.medidas < custo.falas
                 ? ` (${custo.falas - custo.medidas} fala(s) sem contagem do provedor)` : '')
           });
+        }
+
+        if (deep && respostas.length) {
+          await arquivarDeep(texto, respostas);
         }
       }
     } finally {

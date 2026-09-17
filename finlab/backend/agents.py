@@ -396,6 +396,35 @@ _REGRA_PROMESSAS = (
     "usuário, item a item. Você propõe, ele decide.\n"
 )
 
+# Montagem de carteira: só quando o usuário PEDE uma carteira. O gestor (e a
+# mesa em conjunto) propõe composição com pesos e tese por posição; o painel
+# transforma o bloco num cartão com o botão de salvar — quem cria é o
+# usuário, nunca o modelo. Na tela principal a mesa enxerga o painel inteiro
+# (as 90 empresas com valor, porte e qualidade), então ela escolhe de lá.
+_REGRA_CARTEIRA = (
+    "\nMONTAR CARTEIRA — quando, e só quando, o usuário pedir uma carteira "
+    "(\"monte uma carteira\", \"carteira de dividendos\", \"5 ações para...\"):\n"
+    "Responda em texto o raciocínio da seleção e FECHE com um bloco ```json "
+    "neste formato exato:\n"
+    '{"carteira": {"nome": "Qualidade a preço razoável", '
+    '"mandato": "o objetivo da carteira em 1-2 frases", '
+    '"posicoes": [{"ticker": "WEGE3", "peso": 0.25, '
+    '"tese": "por que este papel, em 1-2 frases com número"}], '
+    '"regras": {"banda": 0.05, "macro": "condições macro que pedem revisão", '
+    '"micro": "condições micro que pedem revisão"}}}\n'
+    "Regras duras:\n"
+    "• Só tickers que estão no CONTEXTO (o painel). Nada de fora — o "
+    "acompanhamento precisa de preço e fundamento do painel.\n"
+    "• `peso` em fração (0.25 = 25%), somando 1.0. Respeite restrições que o "
+    "usuário der (nº de papéis, setor, peso máximo).\n"
+    "• Cada posição com `tese` citando o número do painel que a sustenta.\n"
+    "• `regras.macro`/`regras.micro`: em que condições ESTA carteira deveria "
+    "ser revista (ex.: Selic acima de X, margem da empresa Y abaixo de Z). "
+    "São anotações de acompanhamento, não ordens automáticas.\n"
+    "• O painel transforma o bloco num cartão com botão de salvar: você "
+    "propõe, o usuário decide. Nunca diga que a carteira 'foi criada'.\n"
+)
+
 # Voz padrão quando o usuário não escolheu um agente: a mesa falando junto.
 CHAT_SYSTEM = _COMUM + (
     "\nSeu papel: você é a mesa inteira, em conversa. O usuário está com o painel aberto e "
@@ -546,6 +575,11 @@ def _sistema_da_conversa(agente: str | None, contexto: str) -> str:
         base = CHAT_SYSTEM
     if "DOCUMENTOS DA EMPRESA (trechos oficiais" in contexto:
         base += _REGRA_PROMESSAS
+    # A regra de carteira só entra quando a mesa enxerga a lista das ações do
+    # painel — é dela que os tickers podem sair; ETF e BDR ficam fora porque o
+    # acompanhamento de carteira precisa do universo com preço e fundamento.
+    if "ações do painel" in contexto:
+        base += _REGRA_CARTEIRA
     return base + "\n\nCONTEXTO\n========\n" + contexto
 
 
@@ -1406,3 +1440,24 @@ def parse_assumption_json(text: str) -> Optional[dict]:
         return json.loads(trecho[inicio:fim + 1])
     except ValueError:
         return None
+
+
+def parse_carteira_json(text: str) -> Optional[dict]:
+    """Extrai a proposta de carteira (`{"carteira": {...}}`) da fala da mesa.
+
+    Devolve só o dicionário interno, já com o mínimo verificado (nome e
+    posições em lista) — a validação de verdade (universo, pesos, banda) é
+    do carteiras.criar, no clique do usuário. Aqui é só o parse: proposta
+    malformada vira None e a fala segue como texto normal.
+    """
+    dados = parse_assumption_json(text)
+    if not isinstance(dados, dict):
+        return None
+    proposta = dados.get("carteira")
+    if not isinstance(proposta, dict):
+        return None
+    if not str(proposta.get("nome") or "").strip():
+        return None
+    if not isinstance(proposta.get("posicoes"), list) or not proposta["posicoes"]:
+        return None
+    return proposta
