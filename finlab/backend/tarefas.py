@@ -33,7 +33,7 @@ def _atualizar_carteiras(gerar_lamina: bool) -> int:
             print(f"[ok] {r['nome']}: cota {r['cota']:.2f}"
                   + (f" · {len(alertas)} alerta(s) de banda" if alertas else ""))
             for a in alertas:
-                print(f"     ⚠ {a}")
+                print(f"     ! {a}")
         else:
             falhas += 1
             print(f"[ERRO] {r['nome']}: {r.get('erro')}")

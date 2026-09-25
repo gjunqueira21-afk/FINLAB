@@ -14,7 +14,7 @@ o research é pedido — condição de mercado é julgamento, e julgamento aqui
 sempre passa por gente.
 
 Decisões de robustez (da revisão de arquitetura):
-• Escrita protegida por lock de ARQUIVO (fcntl): o cron roda em outro
+• Escrita protegida por lock de ARQUIVO (flock/msvcrt): o cron roda em outro
   processo que a UI, e read-modify-write sem lock perderia eventos.
 • Snapshot histórico é magro (data, cota, retornos, nº de alertas); o
   retrato completo (pesos, preços, alertas) vive só em `atual` — o arquivo
@@ -37,10 +37,17 @@ import re
 import secrets
 import unicodedata
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+try:                                  # Unix: lock de arquivo nativo
+    import fcntl as _fcntl
+    _msvcrt = None
+except ImportError:                   # Windows: o painel também roda local
+    _fcntl = None
+    import msvcrt as _msvcrt
 
 from . import market, universe
 from .settings import DATA_DIR
@@ -54,7 +61,12 @@ MAX_SNAPSHOTS = 1500         # ~6 anos de pregões; além disso, apara do iníci
 MAX_EVENTOS = 200
 MAX_ATRASO_DIAS = 7          # preço mais velho que isso não abre carteira
 
-_TZ = ZoneInfo("America/Sao_Paulo")
+try:
+    _TZ = ZoneInfo("America/Sao_Paulo")
+except ZoneInfoNotFoundError:
+    # Windows sem o pacote tzdata não tem base de fusos; São Paulo não tem
+    # horário de verão desde 2019, então UTC-3 fixo dá a mesma data.
+    _TZ = timezone(timedelta(hours=-3))
 
 
 def _hoje() -> str:
@@ -80,22 +92,44 @@ def _caminho(carteira_id: str) -> Path:
 
 @contextmanager
 def _travado(carteira_id: str):
-    """Lock exclusivo por carteira, entre PROCESSOS (fcntl.flock).
+    """Lock exclusivo por carteira, entre PROCESSOS.
 
     O uvicorn e o cron (`docker compose exec … tarefas`) são processos
     diferentes: um `threading.Lock` não bastaria. O lock envolve o ciclo
-    inteiro ler → mudar → gravar de quem escreve.
+    inteiro ler → mudar → gravar de quem escreve. `flock` no Linux (a VPS),
+    `msvcrt.locking` no Windows (o painel rodando no PC).
     """
-    import fcntl
-
     DIR_CARTEIRAS.mkdir(parents=True, exist_ok=True)
     trava = DIR_CARTEIRAS / (Path(carteira_id).name + ".lock")
     with trava.open("w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        _trava(fh)
         try:
             yield
         finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            _destrava(fh)
+
+
+def _trava(fh) -> None:
+    if _fcntl is not None:
+        _fcntl.flock(fh, _fcntl.LOCK_EX)
+        return
+    # LK_LOCK desiste depois de ~10 s; o outro processo segura o lock por
+    # milissegundos, então insistir é o certo.
+    while True:
+        try:
+            fh.seek(0)
+            _msvcrt.locking(fh.fileno(), _msvcrt.LK_LOCK, 1)
+            return
+        except OSError:
+            continue
+
+
+def _destrava(fh) -> None:
+    if _fcntl is not None:
+        _fcntl.flock(fh, _fcntl.LOCK_UN)
+        return
+    fh.seek(0)
+    _msvcrt.locking(fh.fileno(), _msvcrt.LK_UNLCK, 1)
 
 
 def _gravar(c: dict) -> None:
