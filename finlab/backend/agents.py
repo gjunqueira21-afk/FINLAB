@@ -1041,8 +1041,10 @@ def contexto_lista_acoes(overview: dict, macro: dict, setores: dict) -> str:
         "TELA ABERTA: lista principal com as "
         f"{len(rows)} ações do painel, ordenadas da melhor para a pior "
         "saúde financeira (nota 0-100 construída das demonstrações anuais da CVM).",
-        "Múltiplos calculados com o preço recente sobre o último exercício fechado "
-        "na CVM. Bancos/seguradoras não têm DL/EBITDA nem EPV (n/a).",
+        "P/L, P/VP, EV/EBITDA e ROE são dos últimos 12 meses (BRAPI, acompanha o "
+        "último trimestre); quando a BRAPI não tem, saem do último exercício fechado "
+        "na CVM. DL/EBITDA, margens, ROIC e CAGR são do último exercício CVM. "
+        "Bancos/seguradoras não têm DL/EBITDA nem EPV (n/a).",
         "",
         "VOCÊ TEM O PAINEL INTEIRO AQUI. Cada linha traz o dossiê resumido de uma "
         "empresa — preço, valor por poder de lucro, múltiplos, porte e qualidade. "
@@ -1170,6 +1172,22 @@ def contexto_lista_bdrs(payload: dict, macro: dict, setores: dict) -> str:
     return "\n".join(linhas)
 
 
+def _fontes_multiplos(mult: dict) -> str:
+    """De onde veio cada múltiplo, para o modelo não comparar janelas diferentes
+    achando que são a mesma (o ROE de 12 meses contra o do release, p.ex.)."""
+    fontes = mult.get("fontes") or {}
+    nomes = {"pl": "P/L", "pvp": "P/VP", "ev_ebitda": "EV/EBITDA", "roe": "ROE",
+             "dy": "DY", "nd_ebitda": "Dív.Líq/EBITDA"}
+    brapi = [n for k, n in nomes.items() if fontes.get(k) == "BRAPI"]
+    cvm_ = [n for k, n in nomes.items() if fontes.get(k) == "CVM"]
+    partes = []
+    if brapi:
+        partes.append(", ".join(brapi) + " dos últimos 12 meses (BRAPI)")
+    if cvm_:
+        partes.append(", ".join(cvm_) + f" do exercício {mult.get('ano_cvm') or '—'} (CVM)")
+    return "; ".join(partes) or "sem dado"
+
+
 def build_context(payload: dict, assumptions: dict, resultado: dict, macro: dict) -> str:
     """Serializa um contexto compacto e legível para o modelo."""
     fund = payload.get("fundamentals", {})
@@ -1236,7 +1254,8 @@ def build_context(payload: dict, assumptions: dict, resultado: dict, macro: dict
         "",
         "MÚLTIPLOS",
         f"  P/L {mu(mult.get('pl'))} | P/VP {mu(mult.get('pvp'))} | EV/EBITDA {mu(mult.get('ev_ebitda'))} "
-        f"| DY {pc(mult.get('dy'))} | Dív.Líq/EBITDA {mu(mult.get('nd_ebitda'))}",
+        f"| DY {pc(mult.get('dy'))} | ROE {pc(mult.get('roe'))} | Dív.Líq/EBITDA {mu(mult.get('nd_ebitda'))}",
+        f"  Fonte: {_fontes_multiplos(mult)}",
         "",
         "FUNDAMENTOS (último exercício)",
         f"  Receita {bi(base.get('receita'))} | EBITDA {bi(base.get('ebitda'))} | Lucro líquido {bi(base.get('lucro_liquido'))}",

@@ -186,6 +186,122 @@ def test_financeira_nao_recebe_enterprise_value():
     assert mult["ev_ebitda"] is None
 
 
+def _fund_itub():
+    # ITUB4, exercício 2025 na CVM: lucro 45,85 bi / PL 215,08 bi = ROE 21,3%.
+    return {"base": {"lucro_liquido": 45.85e9, "patrimonio_liquido": 215.08e9,
+                     "divida_liquida": None, "ebitda": None, "ebit": None,
+                     "receita": 300e9, "fcl": None},
+            "indicadores": {"roe": 45.85 / 215.08}, "financial": True, "last_year": 2025}
+
+
+def test_multiplos_vem_da_brapi_quando_ela_tem():
+    brapi = {"priceEarnings": 9.5, "dividendYield": 7.0,
+             "defaultKeyStatistics": {"priceToBook": 2.2, "bookValue": 20.0,
+                                      "trailingEps": 4.6},
+             "financialData": {"returnOnEquity": 0.228}}
+    snap = {"market_cap": 400e9, "shares_quote": 10e9, "price": 44.0}
+    mult = metrics.multiples(_fund_itub(), snap, brapi)
+    assert mult["pl"] == pytest.approx(9.5)
+    assert mult["pvp"] == pytest.approx(2.2)
+    assert mult["roe"] == pytest.approx(0.228)
+    assert mult["dy"] == pytest.approx(0.07)
+    # LPA/VPA na mesma janela do P/L e do P/VP da tela: preço ÷ múltiplo.
+    assert mult["lpa"] == pytest.approx(44.0 / 9.5)
+    assert mult["vpa"] == pytest.approx(20.0)
+    assert mult["fontes"]["pl"] == mult["fontes"]["roe"] == "BRAPI"
+    # Banco: nada de EV/EBITDA, nem que a BRAPI mande um.
+    assert mult["ev_ebitda"] is None and mult["ev"] is None
+
+
+def test_roe_da_brapi_em_pontos_percentuais_vira_fracao():
+    # Mesmo número em pontos (22,8): a escala é a que bate com LPA ÷ VPA.
+    brapi = {"defaultKeyStatistics": {"bookValue": 20.0, "trailingEps": 4.6},
+             "financialData": {"returnOnEquity": 22.8}}
+    snap = {"market_cap": 400e9, "shares_quote": 10e9, "price": 44.0}
+    assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
+    # Sem LPA/VPA da BRAPI, a referência é a conta da CVM.
+    brapi = {"financialData": {"returnOnEquity": 22.8}}
+    assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
+    # ROE baixo em pontos (1,2%) não pode virar 120%.
+    fund = _fund_itub()
+    fund["indicadores"]["roe"] = 0.015
+    brapi = {"financialData": {"returnOnEquity": 1.2}}
+    assert metrics.multiples(fund, snap, brapi)["roe"] == pytest.approx(0.012)
+
+
+def test_multiplos_caem_para_a_cvm_campo_a_campo():
+    # BRAPI só com P/L: o resto vem do exercício da CVM, e a fonte diz isso.
+    snap = {"market_cap": 430e9, "shares_quote": 10e9, "price": 43.0}
+    mult = metrics.multiples(_fund_itub(), snap, {"priceEarnings": 9.0,
+                                                  "financialData": {"returnOnEquity": None}})
+    assert mult["fontes"]["pl"] == "BRAPI"
+    assert mult["pvp"] == pytest.approx(430 / 215.08)
+    assert mult["roe"] == pytest.approx(0.2132, abs=1e-4)
+    assert mult["fontes"]["pvp"] == mult["fontes"]["roe"] == "CVM"
+    assert mult["ano_cvm"] == 2025
+    # Sem BRAPI nenhuma, tudo CVM — o comportamento de antes.
+    mult = metrics.multiples(_fund_itub(), snap, None)
+    assert mult["pl"] == pytest.approx(430 / 45.85)
+    assert set(v for v in mult["fontes"].values() if v) == {"CVM"}
+
+
+def test_multiplos_ignoram_lixo_da_brapi():
+    snap = {"market_cap": 430e9, "shares_quote": 10e9, "price": 43.0}
+    brapi = {"priceEarnings": "NaN", "dividendYield": "abc",
+             "defaultKeyStatistics": {"priceToBook": 0},
+             "financialData": {"returnOnEquity": float("inf")}}
+    mult = metrics.multiples(_fund_itub(), snap, brapi)
+    assert mult["pl"] == pytest.approx(430 / 45.85)
+    assert mult["pvp"] == pytest.approx(430 / 215.08)
+    assert mult["dy"] is None
+    assert mult["fontes"]["pl"] == mult["fontes"]["pvp"] == mult["fontes"]["roe"] == "CVM"
+
+
+def test_nao_financeira_usa_ev_ebitda_e_margem_da_brapi():
+    fund = {"base": {"lucro_liquido": 200.0, "patrimonio_liquido": 1000.0,
+                     "divida_liquida": 300.0, "ebitda": 400.0, "ebit": 350.0,
+                     "receita": 2000.0, "fcl": 150.0},
+            "indicadores": {"roe": 0.2, "mg_ebitda": 0.2, "nd_ebitda": 0.75},
+            "financial": False, "last_year": 2025}
+    snap = {"market_cap": 2000.0, "shares_quote": 100.0, "price": 20.0}
+    brapi = {"financialData": {"enterpriseToEbitda": 6.1, "ebitdaMargins": 0.22,
+                               "enterpriseValue": 2500.0}}
+    mult = metrics.multiples(fund, snap, brapi)
+    assert mult["ev_ebitda"] == pytest.approx(6.1)
+    assert mult["mg_ebitda"] == pytest.approx(0.22)
+    assert mult["ev"] == pytest.approx(2500.0)
+    # Alavancagem continua da CVM.
+    assert mult["nd_ebitda"] == pytest.approx(0.75)
+    assert mult["fontes"]["nd_ebitda"] == "CVM"
+
+
+def test_brapi_multiplos_cai_para_papel_a_papel_quando_o_plano_recusa_lote(monkeypatch):
+    import requests
+    from finlab.backend import cache as cache_mod
+    monkeypatch.setattr(market, "BRAPI_TOKEN", "t")
+    monkeypatch.setattr(cache_mod, "get", lambda *a, **k: None)
+    monkeypatch.setattr(cache_mod, "set", lambda *a, **k: None)
+
+    class Resp:
+        status_code = 403
+
+    def recusa(*a, **k):
+        raise requests.HTTPError(response=Resp())
+    monkeypatch.setattr(market._SESSION, "get", recusa)
+    monkeypatch.setattr(market, "brapi_fundamentals",
+                        lambda tk: {"symbol": tk, "priceEarnings": 8.0})
+    out = market.brapi_multiplos(["itub4", "bbdc4"])
+    assert set(out) == {"ITUB4", "BBDC4"}
+
+    # Rede fora do ar: não sai disparando uma consulta por papel.
+    chamadas = []
+    monkeypatch.setattr(market._SESSION, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError()))
+    monkeypatch.setattr(market, "brapi_fundamentals", lambda tk: chamadas.append(tk))
+    assert market.brapi_multiplos(["ITUB4"]) == {}
+    assert chamadas == []
+
+
 # ---------------------------------------------------------------------------
 # Score
 # ---------------------------------------------------------------------------

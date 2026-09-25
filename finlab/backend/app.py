@@ -99,6 +99,9 @@ def _overview_rows() -> dict:
         tickers = universe.TICKERS
         series = market.price_series(tickers)
         quotes = market.brapi_quotes(tickers)
+        # Módulos de múltiplos (12 h de cache) somados à cotação (5 min): o
+        # preço e o valor de mercado continuam vindo da cotação mais fresca.
+        mods = market.brapi_multiplos(tickers)
         # Uma leitura de macro para as 90: o EPV precisa do WACC, e o WACC
         # precisa de Rf/CDI, que são os mesmos para o painel inteiro.
         macro_data = market.macro()
@@ -109,6 +112,8 @@ def _overview_rows() -> dict:
             if not fund:
                 continue
             brapi = quotes.get(comp.ticker)
+            if mods.get(comp.ticker):
+                brapi = {**mods[comp.ticker], **(brapi or {})}
             snap = metrics.market_snapshot(comp.ticker, series.get(comp.ticker, []), brapi, fund)
             mult = metrics.multiples(fund, snap, brapi)
             sc = scoring.score(fund.get("indicadores", {}), fund.get("financial", False))
@@ -170,7 +175,8 @@ def _overview_rows() -> dict:
 
     # v5: a linha ganhou valor (EPV), porte e qualidade. Sem o bump, quem já
     # tem o blob antigo veria a mesa dizer que não tem o dado que existe.
-    return _com_diagnostico(cache.memoize("overview:v5", TTL_QUOTE, build) or {"rows": []})
+    # v6: múltiplos da BRAPI (12 meses) com a fonte de cada um.
+    return _com_diagnostico(cache.memoize("overview:v6", TTL_QUOTE, build) or {"rows": []})
 
 
 def _epv_da_linha(fund: dict, snap: dict, macro_data: dict,
@@ -400,7 +406,8 @@ def _contexto_research_carteira(c: dict) -> str:
     a linha de painel (nota, múltiplos, valor) de cada posição."""
     partes = [carteiras.lamina_md(c), "",
               "LINHAS DO PAINEL (as posições da carteira, com nota de saúde "
-              "financeira 0-100, múltiplos sobre o último exercício CVM e "
+              "financeira 0-100, múltiplos dos últimos 12 meses (BRAPI; na "
+              "falta dela, do último exercício CVM) e "
               "upside do EPV quando o método se aplica)"]
     linhas = {r["ticker"]: r for r in (_overview_rows().get("rows") or [])}
     for p in c["posicoes"]:

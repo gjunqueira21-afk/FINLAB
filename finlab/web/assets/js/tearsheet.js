@@ -5,7 +5,7 @@
 (function (global) {
   'use strict';
 
-  const { fmt, el, h, isNum } = global.FL;
+  const { fmt, el, h, isNum, janelaMultiplo } = global.FL;
 
   let dados = () => ({});
   let universo = () => ({});
@@ -192,9 +192,14 @@
       return fmt.byType(p.multiples ? p.multiples[chave] : null, fmts[chave]);
     }
 
+    // Tooltip com a janela de cada número: 12 meses (BRAPI) ou exercício (CVM).
+    function td(p, chave) {
+      return h('td', { title: janelaMultiplo(p.multiples, chave) }, celula(p, chave));
+    }
+
     const linhaEmpresa = h('tr', { class: 'hero' }, [
       h('td', { class: 'left' }, eu.ticker)
-    ].concat(colunas.map(([k]) => h('td', {}, celula(eu, k))),
+    ].concat(colunas.map(([k]) => td(eu, k)),
              [h('td', {}, isNum(eu.score) ? fmt.num(eu.score, 1) : fmt.dash)]));
 
     const linhasPares = pares
@@ -203,7 +208,7 @@
       .map((p) => {
         const tr = h('tr', { class: 'clickable' }, [
           h('td', { class: 'left' }, p.ticker)
-        ].concat(colunas.map(([k]) => h('td', {}, celula(p, k))),
+        ].concat(colunas.map(([k]) => td(p, k)),
                  [h('td', {}, isNum(p.score) ? fmt.num(p.score, 1) : fmt.dash)]));
         tr.addEventListener('click', () => {
           window.location.href = '/empresa?ticker=' + encodeURIComponent(p.ticker);
@@ -264,7 +269,7 @@
 
     host.appendChild(h('div', { class: 'panel-h' }, h('div', {}, [
       h('div', { class: 'ptitle' }, [h('b', {}, 'Múltiplos contra os pares'),
-        ' · ' + (d.sector_label || '') + ', último exercício fechado']),
+        ' · ' + (d.sector_label || '') + ', últimos 12 meses']),
       h('div', { class: 'psub' },
         'a linha de prêmio/desconto compara com a mediana dos pares — o resto '
         + 'da tabela explica o porquê')
@@ -286,7 +291,9 @@
           + 'crescimento o preço de hoje exige. As colunas de ROE, margem e saúde mostram o '
           + 'que sustenta o múltiplo — a simulação diz se é suficiente. Medianas calculadas '
           + 'só com valores positivos em P/L, P/VP e EV/EBITDA: empresa com prejuízo '
-          + 'distorceria a referência de caro/barato.'
+          + 'distorceria a referência de caro/barato. P/L, P/VP, EV/EBITDA, ROE e margem são '
+          + 'dos últimos 12 meses (BRAPI) e, quando ela não tem o dado, do último exercício na '
+          + 'CVM; Dív.Líq/EBITDA é sempre da CVM. Passe o mouse no número para ver a fonte.'
         : '<b>Sem pares carregados para este ativo.</b> A comparação setorial precisa das '
           + 'demonstrações das outras empresas do setor, que este painel não carrega aqui.'
     }));

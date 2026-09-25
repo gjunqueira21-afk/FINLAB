@@ -420,6 +420,7 @@
     min -= folga; max += folga;
     const X = (v) => pad.l + ((v - min) / (max - min)) * (R - pad.l);
 
+    const porCima = [];
     items.forEach((it, i) => {
       const y = pad.t + i * linha + linha / 2;
       const cor = it.color || COLORS.brand;
@@ -474,16 +475,30 @@
         }));
       }
 
+      // O texto da faixa vai à direita da barra; se não couber, à esquerda;
+      // se a barra ocupa o eixo quase todo, sobre ela — nunca por cima do
+      // rótulo da linha, que é o que acontecia com a faixa colada à margem.
       const texto = fmtV(it.from) + ' – ' + fmtV(it.to);
-      const cabe = b + 10 + texto.length * CHAR_W <= R;
+      const larg = texto.length * CHAR_W;
+      const lado = b + 10 + larg <= R ? 'dir' : a - 10 - larg >= pad.l ? 'esq' : 'cima';
       const faixa = el('text', {
-        x: cabe ? b + 10 : Math.max(pad.l, a - 10), y: y + 3.5,
+        x: lado === 'dir' ? b + 10 : lado === 'esq' ? a - 10
+          : Math.max(pad.l + larg / 2, Math.min((a + b) / 2, R - larg / 2)),
+        y: lado === 'cima' ? y - 10 : y + 3.5,
         'font-size': 10, fill: '#E6ECF5',
-        'text-anchor': cabe ? 'start' : 'end',
+        'text-anchor': lado === 'dir' ? 'start' : lado === 'esq' ? 'end' : 'middle',
         'font-family': 'ui-monospace, monospace'
       });
       faixa.textContent = texto;
       svg.appendChild(faixa);
+      // Sobre a barra, o texto fica no caminho da linha do preço de tela:
+      // ganha um halo da cor do painel e é redesenhado por cima dela.
+      if (lado === 'cima') {
+        faixa.setAttribute('stroke', '#0B1322');
+        faixa.setAttribute('stroke-width', 4);
+        faixa.setAttribute('paint-order', 'stroke');
+        porCima.push(faixa);
+      }
     });
 
     // O preço de tela atravessa tudo — é contra ele que as faixas se leem.
@@ -504,6 +519,7 @@
       lb.textContent = texto;
       svg.appendChild(lb);
     }
+    porCima.forEach((t) => svg.appendChild(t));
   }
 
   global.FLChart = { line, ring, footballField, niceTicks, observarLargura, COLORS };
