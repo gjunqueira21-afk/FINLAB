@@ -1,6 +1,8 @@
-# FinLab na VPS: dois contêineres.
-#   finlab — o painel (uvicorn), só visível dentro desta rede
-#   caddy  — HTTPS automático (Let's Encrypt) + senha na frente de tudo
+# FinLab na VPS.
+#   finlab — o painel (uvicorn), só visível dentro da rede do compose
+#   caddy  — HTTPS automático (Let's Encrypt) + senha, para VPS sem proxy
+#            (perfil "caddy"). Se a VPS já tem um Traefik nas portas 80/443,
+#            o instalar.sh liga o docker-compose.traefik.yml no lugar dele.
 # Configuração em deploy/.env (crie com instalar.sh; nunca vai para o git).
 name: finlab
 
@@ -25,6 +27,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    profiles: ["caddy"]
     restart: unless-stopped
     ports:
       - "80:80"

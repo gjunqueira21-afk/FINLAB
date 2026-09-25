@@ -80,9 +80,16 @@ tem espaço, cite-o entre aspas em scripts).
 
 ~1,5 GB de disco (imagem + dados da CVM) e ~1 GB de RAM em uso normal.
 
-## Se as portas 80/443 já estiverem ocupadas
+## Se a VPS já tem um Traefik (80/443 ocupadas)
 
-Outra aplicação Docker da VPS pode já estar usando 80/443 (o instalador
-avisa). Nesse caso o Caddy do FinLab não sobe — é só dizer qual aplicação
-ocupa as portas que o deploy é adaptado para se pendurar no proxy existente
-ou usar outras portas.
+É o caso comum na Hostinger: um Traefik já publica as outras aplicações nas
+portas 80/443. O `instalar.sh` detecta isso sozinho e **não sobe o Caddy** —
+o FinLab entra na rede do Traefik e se anuncia por labels (domínio, HTTPS e
+senha), sem tocar nas outras aplicações. Ele descobre a rede, o entrypoint
+HTTPS e o resolvedor de certificado do Traefik que está rodando e pede
+confirmação antes de seguir. A escolha fica gravada no `deploy/.env`
+(`COMPOSE_FILE=…traefik.yml`), então `atualizar.sh` e os crons continuam
+iguais.
+
+Se 80/443 estiverem ocupadas por outra coisa que não um Traefik, o
+instalador para e mostra como descobrir quem ocupa.
