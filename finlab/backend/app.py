@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import call_analise, calls, promessas  # noqa: F401  (rotas abaixo)
+from . import call_analise, calls, carteiras, deep, promessas  # noqa: F401  (rotas abaixo)
 from . import (agents, b3data, bdrs, cache, cvm, docs, etfs, ipe, market, metrics,
                regime, scoring, universe, valuation, xlsx_dcf)
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
@@ -268,6 +268,193 @@ def api_promessa_remover(ticker: str, promessa_id: str):
     if not promessas.remover(_ticker_valido(ticker), promessa_id):
         raise HTTPException(status_code=404, detail="Promessa não encontrada.")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Carteiras acompanhadas — a mesa propõe, o usuário salva, o painel segue.
+# Tudo aqui é quantitativo (roda sem chave de LLM): é o que o cron da VPS
+# chama. A exceção é o research, que recebe o slot na requisição — a chave
+# continua viajando do navegador, nunca ficando no servidor.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/carteiras")
+def api_carteiras():
+    return {"carteiras": carteiras.listar()}
+
+
+@app.post("/api/carteiras")
+def api_carteira_criar(body: dict = Body(...)):
+    try:
+        c = carteiras.criar(body or {})
+    except carteiras.CarteiraInvalida as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return carteiras.detalhe(c)
+
+
+@app.post("/api/carteiras/atualizar-todas")
+def api_carteiras_atualizar_todas():
+    """O que o cron chama por HTTP; a CLI (`python -m finlab.backend.tarefas`)
+    faz o mesmo sem passar pelo servidor."""
+    return {"resultados": carteiras.atualizar_todas()}
+
+
+def _carteira_ou_404(carteira_id: str) -> dict:
+    c = carteiras.obter(carteira_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Carteira não encontrada.")
+    return c
+
+
+@app.get("/api/carteiras/{carteira_id}")
+def api_carteira(carteira_id: str):
+    return carteiras.detalhe(_carteira_ou_404(carteira_id))
+
+
+@app.patch("/api/carteiras/{carteira_id}")
+def api_carteira_editar(carteira_id: str, body: dict = Body(...)):
+    try:
+        return carteiras.detalhe(carteiras.editar(carteira_id, body or {}))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Carteira não encontrada.") from exc
+    except carteiras.CarteiraInvalida as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/carteiras/{carteira_id}")
+def api_carteira_remover(carteira_id: str):
+    if not carteiras.remover(carteira_id):
+        raise HTTPException(status_code=404, detail="Carteira não encontrada.")
+    return {"ok": True}
+
+
+@app.post("/api/carteiras/{carteira_id}/atualizar")
+def api_carteira_atualizar(carteira_id: str):
+    try:
+        return carteiras.detalhe(carteiras.atualizar(carteira_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Carteira não encontrada.") from exc
+    except carteiras.CarteiraInvalida as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/carteiras/{carteira_id}/rebalancear")
+def api_carteira_rebalancear(carteira_id: str):
+    try:
+        return carteiras.detalhe(carteiras.rebalancear(carteira_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Carteira não encontrada.") from exc
+    except carteiras.CarteiraInvalida as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/carteiras/{carteira_id}/lamina.md")
+def api_carteira_lamina(carteira_id: str):
+    """A lâmina quantitativa — gerada na hora, sem LLM."""
+    return Response(content=carteiras.lamina_md(_carteira_ou_404(carteira_id)),
+                    media_type="text/markdown; charset=utf-8")
+
+
+def _contexto_research_carteira(c: dict) -> str:
+    """O que o Gestor recebe para escrever o research: a lâmina inteira mais
+    a linha de painel (nota, múltiplos, valor) de cada posição."""
+    partes = [carteiras.lamina_md(c), "",
+              "LINHAS DO PAINEL (as posições da carteira, com nota de saúde "
+              "financeira 0-100, múltiplos sobre o último exercício CVM e "
+              "upside do EPV quando o método se aplica)"]
+    linhas = {r["ticker"]: r for r in (_overview_rows().get("rows") or [])}
+    for p in c["posicoes"]:
+        r = linhas.get(p["ticker"])
+        if not r:
+            partes.append(f"  {p['ticker']}: sem linha no painel agora.")
+            continue
+        m = r.get("multiples") or {}
+        def _f(v, fmt="{:.1f}"):
+            return fmt.format(v) if isinstance(v, (int, float)) else "n/a"
+        partes.append(
+            f"  {p['ticker']} ({r.get('name')}, {r.get('sector')}): "
+            f"nota {_f(r.get('score'), '{:.0f}')} · P/L {_f(m.get('pl'))} · "
+            f"EV/EBITDA {_f(m.get('ev_ebitda'))} · ROE {_f(m.get('roe'), '{:.1%}')} · "
+            f"DY {_f(m.get('dy'), '{:.1%}')} · DL/EBITDA {_f(m.get('nd_ebitda'))} · "
+            f"upside EPV {_f(r.get('epv_upside'), '{:+.0%}')}")
+    macro_data = market.macro() or {}
+    if macro_data:
+        partes.append("")
+        partes.append("MACRO DO DIA")
+        partes += [f"  {k.upper()}: {v.get('value')} ({v.get('source')})"
+                   for k, v in macro_data.items() if isinstance(v, dict)]
+    return "\n".join(partes)
+
+
+@app.post("/api/carteiras/{carteira_id}/research")
+def api_carteira_research(carteira_id: str, body: dict = Body(...)):
+    """O relatório completo de UMA carteira, escrito pelo Gestor da mesa.
+
+    Este é o único endpoint de carteira que usa LLM — e por isso recebe o
+    `slot` do navegador, como todo o resto da mesa. O texto volta para a
+    tela E fica arquivado em data/carteiras/research/, com a data no nome.
+    """
+    c = _carteira_ou_404(carteira_id)
+    slot = (body or {}).get("slot") or {}
+    api_key = (slot.get("api_key") or "").strip()
+    model = (slot.get("model") or "").strip()
+    if not api_key or not model:
+        raise HTTPException(status_code=400,
+                            detail="Configure um slot com chave e modelo em ⚙ Modelos de IA.")
+
+    sistema = (
+        "Você é o Gestor de uma mesa de análise fundamentalista de ações "
+        "brasileiras. Escreva um RESEARCH completo da carteira descrita no "
+        "CONTEXTO, em markdown, em português: (1) visão geral e aderência ao "
+        "mandato; (2) performance contra o benchmark e o que a explicou "
+        "(use a contribuição por posição); (3) uma seção por posição — tese "
+        "original, o que os números do painel dizem hoje, o que a fortalece "
+        "ou ameaça; (4) leitura das regras macro/micro da carteira contra o "
+        "macro do dia — alguma condição de revisão foi atingida?; (5) riscos "
+        "e o que monitorar até a próxima revisão. Números SÓ do contexto — "
+        "não invente dado; o que faltar, diga que falta. Feche com a "
+        "ressalva de que nada aqui é recomendação de investimento.\n\n"
+        "CONTEXTO\n========\n" + _contexto_research_carteira(c))
+    try:
+        texto = agents.chat(slot.get("provider"), api_key, model, sistema,
+                            f"Escreva o research completo da carteira "
+                            f"\"{c['nome']}\" com os dados do contexto.",
+                            temperature=0.3, max_tokens=4000)
+    except agents.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    destino = carteiras.DIR_CARTEIRAS / "research"
+    destino.mkdir(parents=True, exist_ok=True)
+    arquivo = f"{c['id']}-{carteiras._hoje()}.md"
+    (destino / arquivo).write_text(texto + "\n", encoding="utf-8")
+    return {"texto": texto, "arquivo": arquivo, "modelo": model,
+            "provedor": slot.get("provider")}
+
+
+# --- Deep researches arquivados (pasta "deep empresas", pedido do usuário) ---
+
+@app.post("/api/company/{ticker}/deep")
+def api_deep_salvar(ticker: str, body: dict = Body(...)):
+    """Arquiva a rodada de deep research que o navegador mandou — o conteúdo
+    vem pronto do chat; aqui só se valida e grava o .md."""
+    tk = _ticker_valido(ticker)
+    try:
+        return deep.salvar(tk, str((body or {}).get("conteudo") or ""),
+                           titulo=str((body or {}).get("titulo") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/deep")
+def api_deep_listar():
+    return {"researches": deep.listar()}
+
+
+@app.get("/api/deep/{arquivo}")
+def api_deep_ler(arquivo: str):
+    corpo = deep.ler(arquivo)
+    if corpo is None:
+        raise HTTPException(status_code=404, detail="Research não encontrado.")
+    return Response(content=corpo, media_type="text/markdown; charset=utf-8")
 
 
 @app.get("/api/company/{ticker}/calls")
@@ -903,6 +1090,14 @@ def api_agent_chat(body: dict = Body(...)):
         achadas = docs.promessas_propostas(texto_final, trechos_docs)
         return achadas or None
 
+    # Proposta de carteira da mesa: vira cartão com botão de salvar no chat —
+    # criar mesmo é POST /api/carteiras, no clique do usuário. Só na tela de
+    # ações, que é onde a mesa enxerga o universo que a carteira aceita.
+    def carteira_de(texto_final: str):
+        if tela != "acoes":
+            return None
+        return agents.parse_carteira_json(texto_final)
+
     if body.get("stream"):
         def eventos():
             try:
@@ -916,7 +1111,8 @@ def api_agent_chat(body: dict = Body(...)):
                               "uso": ev.get("uso"), "modelo": model,
                               "provedor": slot.get("provider"), "agente": agente,
                               "proposta": proposta_de(texto_final),
-                              "promessas": promessas_de(texto_final)}
+                              "promessas": promessas_de(texto_final),
+                              "carteira": carteira_de(texto_final)}
                     yield "data: " + json.dumps(ev, ensure_ascii=False) + "\n\n"
             except agents.LLMError as exc:
                 yield "data: " + json.dumps({"erro": str(exc)},
@@ -938,7 +1134,8 @@ def api_agent_chat(body: dict = Body(...)):
 
     return {"texto": texto, "modelo": model, "provedor": slot.get("provider"),
             "ticker": ticker or None, "agente": agente,
-            "proposta": proposta_de(texto), "promessas": promessas_de(texto)}
+            "proposta": proposta_de(texto), "promessas": promessas_de(texto),
+            "carteira": carteira_de(texto)}
 
 
 @app.post("/api/agents/run")
@@ -1082,6 +1279,11 @@ def etf_page():
 @app.get("/bdrs")
 def bdrs_page():
     return FileResponse(WEB_DIR / "bdrs.html")
+
+
+@app.get("/carteiras")
+def carteiras_page():
+    return FileResponse(WEB_DIR / "carteiras.html")
 
 
 @app.exception_handler(404)

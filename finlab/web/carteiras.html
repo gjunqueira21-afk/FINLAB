@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carteiras · FinLab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='78' font-size='78'>🧠</text></svg>">
+<link rel="stylesheet" href="/assets/css/finlab.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div id="brand"></div>
+    <div id="nav"></div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <span class="tag-pill" id="sourcePill">—</span>
+      <button class="btn ghost" id="btnAtualizarTodas" title="Recalcula cota, pesos e alertas de todas as carteiras">↻ Atualizar todas</button>
+      <button class="btn" id="btnLLM">⚙ A mesa de IA</button>
+    </div>
+  </header>
+
+  <div id="alertZone"></div>
+
+  <main id="conteudo"></main>
+
+  <div class="foot">
+    <b>Como ler esta tela.</b> Cada carteira nasce de uma proposta da mesa de IA (aprovada por você
+    no chat) ou de uma montagem manual, e vira uma <b>cota base 100</b> na data de criação —
+    buy-and-hold entre rebalanceamentos, sem custos, impostos nem proventos. O
+    <b>BOVA11</b> comprado no mesmo dia é a régua de comparação (o ETF embute os dividendos;
+    a cota da carteira não — a comparação subestima a carteira). Quando um peso sai da
+    <b>banda</b> configurada, o painel alerta; rebalancear é sempre um clique seu, registrado no
+    histórico. O cron da VPS pode atualizar tudo isso sozinho — sem chave de IA nenhuma.
+    <br><br><b>Isto não é recomendação de investimento.</b>
+  </div>
+</div>
+
+<script src="/assets/js/core.js"></script>
+<script src="/assets/js/charts.js"></script>
+<script src="/assets/js/settings.js"></script>
+<script src="/assets/js/chat.js"></script>
+<script src="/assets/js/carteiras.js"></script>
+</body>
+</html>

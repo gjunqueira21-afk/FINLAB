@@ -43,6 +43,7 @@ Quando aparecer `FinLab no ar`, acesse `https://seu-dominio` e faça login.
 |---|---|
 | Atualizar o código (depois de um PR aceito) | `bash atualizar.sh` |
 | Atualizar as demonstrações da CVM | `bash atualizar-dados.sh` |
+| Atualizar as carteiras acompanhadas (cota, alertas, lâminas) | `bash atualizar-carteiras.sh` |
 | Ver os logs | `docker compose logs -f finlab` |
 | Parar / subir | `docker compose down` / `docker compose up -d` |
 
@@ -52,7 +53,16 @@ Para os dados se atualizarem sozinhos toda segunda às 6h:
 crontab -e
 # adicione a linha:
 0 6 * * 1  cd /root/FINLAB/deploy && bash atualizar-dados.sh >> /var/log/finlab-dados.log 2>&1
+# e, meia hora depois, as carteiras acompanhadas (cota, alertas de banda e lâminas):
+30 6 * * 1  cd /root/FINLAB/deploy && bash atualizar-carteiras.sh >> /var/log/finlab-carteiras.log 2>&1
 ```
+
+O cron das carteiras roda **sem chave de IA nenhuma** (as chaves ficam no
+navegador): ele recalcula cota, pesos, alertas de banda e regrava a lâmina
+`.md` de cada carteira. Research e análise continuam sendo pedidos pela
+interface. Os deep researches pedidos no chat ficam em
+`finlab/data/deep empresas/` (dentro do volume `finlab_dados_app` — o nome
+tem espaço, cite-o entre aspas em scripts).
 
 ## Como as coisas ficam guardadas
 
