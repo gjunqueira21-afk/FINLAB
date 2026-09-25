@@ -8,8 +8,10 @@ contábil, score e o proxy dos agentes de IA.
 from __future__ import annotations
 
 import json
+import logging
+import math
 import statistics
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -20,7 +22,46 @@ from . import (agents, b3data, bdrs, cache, cvm, docs, etfs, ipe, market, metric
                regime, scoring, universe, valuation, xlsx_dcf)
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
 
-app = FastAPI(title="FinLab", version="2.0", docs_url="/api/docs")
+_log = logging.getLogger("finlab")
+
+
+def _sem_nao_finitos(obj: Any, caminho: str = "", achados: Optional[list] = None) -> Any:
+    """NaN e ±inf viram None, recursivamente.
+
+    Conta com dado faltando (banco não tem EBITDA, trimestre sem linha na
+    CVM) sai do pandas como NaN, e JSON não tem NaN: a resposta inteira
+    virava erro 500. None chega à tela como "—", que é o que o painel já
+    mostra para dado ausente. Os caminhos encontrados vão para o log, para a
+    origem do NaN poder ser corrigida na fonte.
+    """
+    if isinstance(obj, float):
+        if math.isfinite(obj):
+            return obj
+        if achados is not None and len(achados) < 5:
+            achados.append(caminho or "(raiz)")
+        return None
+    if isinstance(obj, dict):
+        return {k: _sem_nao_finitos(v, f"{caminho}.{k}" if caminho else str(k), achados)
+                for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sem_nao_finitos(v, f"{caminho}[{i}]", achados) for i, v in enumerate(obj)]
+    return obj
+
+
+class JSONSeguro(JSONResponse):
+    """JSONResponse que não quebra com NaN/inf — vira null, com aviso no log."""
+
+    def render(self, content: Any) -> bytes:
+        achados: list = []
+        limpo = _sem_nao_finitos(content, achados=achados)
+        if achados:
+            _log.warning("valores não finitos trocados por null em: %s", ", ".join(achados))
+        return json.dumps(limpo, ensure_ascii=False, allow_nan=False,
+                          separators=(",", ":")).encode("utf-8")
+
+
+app = FastAPI(title="FinLab", version="2.0", docs_url="/api/docs",
+              default_response_class=JSONSeguro)
 
 
 @app.middleware("http")
