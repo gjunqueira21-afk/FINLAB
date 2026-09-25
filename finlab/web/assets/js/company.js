@@ -6,7 +6,8 @@
 (function () {
   'use strict';
 
-  const { fmt, api, el, qs, qsa, h, esc, isNum, signClass, janelaMultiplo } = window.FL;
+  const { fmt, api, el, qs, qsa, h, esc, isNum, signClass, janelaMultiplo,
+    multiplosDe } = window.FL;
   const E = window.FLEngine;
   const C = window.FLChart;
 
@@ -32,7 +33,7 @@
 
   function renderStrip() {
     const d = state.data;
-    const f = d.fundamentals, m = d.market, mu = d.multiples, sc = d.score;
+    const f = d.fundamentals, m = d.market, mu = multiplosDe(d), sc = d.score;
     const perf = m.perf || {};
 
     const banda = 'sb-' + (!isNum(sc.total) ? 'none'
@@ -178,10 +179,10 @@
     // tela (12 meses pela BRAPI ou o exercício da CVM); a faixa é
     // o min–max entre os pares. Só com lucro dos dois lados: P/L de prejuízo
     // não é múltiplo, e LPA negativo tornaria a linha um absurdo.
-    const lpa = (d.multiples || {}).lpa;
+    const lpa = multiplosDe(d).lpa;
     const pls = (d.peers || [])
       .filter((p) => p.ticker !== d.fundamentals.ticker)
-      .map((p) => (p.multiples || {}).pl)
+      .map((p) => multiplosDe(p).pl)
       .filter((v) => isNum(v) && v > 0);
     if (isNum(lpa) && lpa > 0 && pls.length >= 2) {
       const ord = pls.slice().sort((a, b) => a - b);
@@ -377,8 +378,8 @@
               + 'pilares entram com peso fixo. Indicador ausente não pune nem premia: o peso é '
               + 'redistribuído dentro do pilar e a cobertura cai.<br>'
               + `Os indicadores da nota saem do exercício ${esc(String(state.data.fundamentals.last_year || '—'))} `
-              + 'na CVM — por isso o ROE daqui pode diferir do ROE de 12 meses (BRAPI) mostrado '
-              + 'na comparação com os pares.'
+              + 'na CVM — por isso o ROE daqui pode diferir do ROE da comparação com os pares, '
+              + 'que segue a fonte escolhida no seletor (BRAPI ou CVM, 12 meses ou exercício).'
               + (sc.parcial ? '<br><b style="color:var(--amber)">Nota parcial:</b> menos de 60% '
                 + 'dos indicadores têm dado na base da CVM.' : '')
           })
@@ -586,6 +587,13 @@
       bindResize();
       renderAll();
       renderFooter();
+      // Trocou a fonte dos múltiplos (no seletor dos pares): o P/L do topo,
+      // o football field e a tabela de pares redesenham na fonte nova.
+      window.addEventListener('fl:fonte-multiplos', () => {
+        renderStrip();
+        renderField();
+        renderCorpoDeLeitura();
+      });
 
       // A mesa recebe as premissas padrão do painel (e o que ela mesma já
       // propôs e o usuário aplicou) na hora do envio, não na montagem.

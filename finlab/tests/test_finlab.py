@@ -222,11 +222,16 @@ def test_roe_da_brapi_em_pontos_percentuais_vira_fracao():
     # Sem LPA/VPA da BRAPI, a referência é a conta da CVM.
     brapi = {"financialData": {"returnOnEquity": 22.8}}
     assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
-    # ROE baixo em pontos (1,2%) não pode virar 120%.
-    fund = _fund_itub()
-    fund["indicadores"]["roe"] = 0.015
+    # ROE baixo em pontos (1,2%) não pode virar 120%: com LPA ÷ VPA da própria
+    # BRAPI (mesma janela) a escala sai certa mesmo com o anual da CVM em 21%.
+    brapi = {"defaultKeyStatistics": {"bookValue": 20.0, "trailingEps": 0.24},
+             "financialData": {"returnOnEquity": 1.2}}
+    assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.012)
+    # Sem LPA/VPA, a referência seguinte é a CVM de 12 meses (mesma janela).
+    ltm = {"fim": "2026-06-30", "rotulo": "LTM 2T26",
+           "campos": {"lucro_liquido": 2.6e9, "patrimonio_liquido": 215e9}}
     brapi = {"financialData": {"returnOnEquity": 1.2}}
-    assert metrics.multiples(fund, snap, brapi)["roe"] == pytest.approx(0.012)
+    assert metrics.multiples(_fund_itub(), snap, brapi, ltm)["roe"] == pytest.approx(0.012)
 
 
 def test_multiplos_caem_para_a_cvm_campo_a_campo():
@@ -273,6 +278,72 @@ def test_nao_financeira_usa_ev_ebitda_e_margem_da_brapi():
     # Alavancagem continua da CVM.
     assert mult["nd_ebitda"] == pytest.approx(0.75)
     assert mult["fontes"]["nd_ebitda"] == "CVM"
+
+
+def _ltm_itub():
+    # 12 meses até o 2T26 pelos ITRs: lucro 50 bi sobre PL de 220 bi = 22,7%.
+    return {"fim": "2026-06-30", "rotulo": "LTM 2T26",
+            "campos": {"lucro_liquido": 50e9, "patrimonio_liquido": 220e9,
+                       "receita": 310e9}}
+
+
+def test_cada_fonte_escolhida_e_respeitada():
+    snap = {"market_cap": 440e9, "shares_quote": 10e9, "price": 44.0}
+    brapi = {"priceEarnings": 9.5, "financialData": {"returnOnEquity": 0.215}}
+    por = metrics.multiplos_por_fonte(_fund_itub(), snap, brapi, _ltm_itub())
+    assert set(por) == set(metrics.FONTES)
+
+    ex = por["cvm_exercicio"]
+    assert ex["roe"] == pytest.approx(45.85 / 215.08)
+    assert ex["pl"] == pytest.approx(440 / 45.85)
+    assert ex["lpa"] == pytest.approx(4.585)
+    assert set(v for v in ex["fontes"].values() if v) <= {"CVM", "BRAPI"}
+    assert ex["fontes"]["roe"] == "CVM"
+
+    m12 = por["cvm_12m"]
+    assert m12["roe"] == pytest.approx(50 / 220)
+    assert m12["pl"] == pytest.approx(440 / 50)
+    assert m12["pvp"] == pytest.approx(2.0)
+    assert m12["lpa"] == pytest.approx(5.0)
+    assert m12["fontes"]["roe"] == "CVM12" and m12["ltm_rotulo"] == "LTM 2T26"
+
+    b = por["brapi"]
+    assert b["pl"] == pytest.approx(9.5) and b["roe"] == pytest.approx(0.215)
+    # BRAPI escolhida e sem P/VP: fica vazio, não pega o da CVM escondido.
+    assert b["pvp"] is None and b["fontes"]["pvp"] is None
+
+    # Automático: BRAPI, depois CVM 12 meses, depois exercício — campo a campo.
+    a = por["auto"]
+    assert a["pl"] == pytest.approx(9.5) and a["fontes"]["pl"] == "BRAPI"
+    assert a["pvp"] == pytest.approx(2.0) and a["fontes"]["pvp"] == "CVM12"
+    # LPA e VPA na janela do P/L e do P/VP que estão na tela.
+    assert a["lpa"] == pytest.approx(44.0 / 9.5) and a["fontes"]["lpa"] == "BRAPI"
+    assert a["vpa"] == pytest.approx(22.0) and a["fontes"]["vpa"] == "CVM12"
+
+
+def test_sem_itr_a_fonte_cvm_12m_fica_vazia_e_o_auto_cai_para_o_exercicio():
+    snap = {"market_cap": 440e9, "shares_quote": 10e9, "price": 44.0}
+    por = metrics.multiplos_por_fonte(_fund_itub(), snap, None, None)
+    assert all(por["cvm_12m"][k] is None for k in ("pl", "pvp", "roe", "lpa"))
+    assert por["auto"]["roe"] == pytest.approx(45.85 / 215.08)
+    assert por["auto"]["fontes"]["roe"] == "CVM"
+
+
+def test_divida_sobre_ebitda_vem_da_cvm_mesmo_com_brapi_escolhida():
+    fund = {"base": {"lucro_liquido": 200.0, "patrimonio_liquido": 1000.0,
+                     "divida_liquida": 300.0, "ebitda": 400.0, "ebit": 350.0,
+                     "receita": 2000.0, "fcl": 150.0},
+            "indicadores": {}, "financial": False, "last_year": 2025}
+    ltm = {"fim": "2026-06-30", "rotulo": "LTM 2T26",
+           "campos": {"lucro_liquido": 220.0, "patrimonio_liquido": 1100.0,
+                      "divida_liquida": 250.0, "ebitda": 500.0, "receita": 2200.0}}
+    snap = {"market_cap": 2000.0, "shares_quote": 100.0, "price": 20.0}
+    por = metrics.multiplos_por_fonte(fund, snap, {"priceEarnings": 9.0}, ltm)
+    assert por["brapi"]["nd_ebitda"] == pytest.approx(0.5)
+    assert por["brapi"]["fontes"]["nd_ebitda"] == "CVM12"
+    assert por["cvm_exercicio"]["nd_ebitda"] == pytest.approx(0.75)
+    assert por["cvm_12m"]["ev_ebitda"] == pytest.approx(2250 / 500)
+    assert por["cvm_12m"]["mg_ebitda"] == pytest.approx(500 / 2200)
 
 
 def test_brapi_multiplos_cai_para_papel_a_papel_quando_o_plano_recusa_lote(monkeypatch):

@@ -248,6 +248,7 @@ select {
   color: var(--paper); font: 500 12px var(--mono); padding: 9px 12px; cursor: pointer;
 }
 select option { background: var(--panel2); color: var(--paper); }
+select.sel-fonte.mini { font-size: 11px; padding: 6px 10px; }
 
 /* ------------------------------------------------------------------ tabelas */
 

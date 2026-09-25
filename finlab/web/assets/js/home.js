@@ -2,7 +2,8 @@
 (function () {
   'use strict';
 
-  const { fmt, api, el, h, esc, isNum, signClass, prefs, janelaMultiplo } = window.FL;
+  const { fmt, api, el, h, esc, isNum, signClass, prefs, janelaMultiplo, multiplosDe,
+    fonteMultiplos, seletorFonte } = window.FL;
 
   const state = {
     universe: null,
@@ -196,7 +197,8 @@
 
   function metricCell(row, key) {
     const fmts = (state.universe && state.universe.metric_format) || {};
-    const v = row.multiples ? row.multiples[key] : null;
+    const mult = multiplosDe(row);
+    const v = mult[key];
 
     if (key === 'nd_ebitda' && row.financial) {
       return h('td', { class: 'mut', title: 'Não se aplica a instituições financeiras' }, 'n/a');
@@ -211,11 +213,12 @@
 
     // A célula diz de que janela saiu o número: 12 meses (BRAPI) ou o
     // último exercício (CVM) — as duas coexistem na mesma coluna.
-    const janela = janelaMultiplo(row.multiples, key);
+    const janela = janelaMultiplo(mult, key);
     const alerta = (key === 'pl' && isNum(v) && v < 0) ? 'Prejuízo'
       : (key === 'ev_ebitda' && isNum(v) && v < 0) ? 'EBITDA ou EV negativo'
         : null;
-    const title = [alerta, janela].filter(Boolean).join(' · ') || null;
+    const title = [alerta, janela].filter(Boolean).join(' · ')
+      || (isNum(v) ? null : 'Sem o dado nesta fonte');
 
     return h('td', { class: cls, title }, fmt.byType(v, fmts[key] || 'mult'));
   }
@@ -332,7 +335,10 @@
       return;
     }
 
-    const stats = ov.sector_stats || {};
+    // A mediana do cabeçalho sai da mesma fonte que a tabela está mostrando.
+    const fonte = fonteMultiplos();
+    const stats = (fonte !== 'auto' && ov.sector_stats_fontes && ov.sector_stats_fontes[fonte])
+      || ov.sector_stats || {};
     state.universe.sectors.forEach((sec) => {
       const grupo = sortRows(rows.filter((r) => r.sector === sec.key));
       if (!grupo.length) return;
@@ -405,7 +411,7 @@
 
       window.FL.renderFontes(el('sourcePill'), ov.providers, ov.source);
       el('footSource').innerHTML = ' Última carga com <b>' + esc(ov.source || '—')
-        + '</b>; fundamentos das DFPs anuais da CVM.';
+        + '</b>; fundamentos das DFPs e ITRs da CVM.';
 
       renderMacro();
       renderAlerts();
@@ -421,6 +427,10 @@
   function bind() {
     el('viewMode').value = state.view;
     el('sortBy').value = state.sort;
+
+    // Fonte dos múltiplos: ao lado da ordenação; troca e a tabela redesenha.
+    el('sortBy').insertAdjacentElement('afterend', seletorFonte({ id: 'fonteMult' }));
+    window.addEventListener('fl:fonte-multiplos', () => render());
 
     el('search').addEventListener('input', (ev) => {
       state.search = ev.target.value;

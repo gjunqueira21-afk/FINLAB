@@ -93,6 +93,14 @@ def _fundamentals(ticker: str) -> dict:
     return cache.memoize(f"fund:v4:{ticker}", TTL_CVM, lambda: metrics.fundamentals(ticker)) or {}
 
 
+def _ltm(cd_cvm: Optional[str]) -> dict:
+    """12 meses móveis dos ITRs da CVM, com o mesmo cache das demonstrações:
+    a tela principal pede os 90 de uma vez, e o ITR só muda com o pipeline."""
+    if not cd_cvm:
+        return {}
+    return cache.memoize(f"ltm:v1:{cd_cvm}", TTL_CVM, lambda: cvm.ltm_series(cd_cvm)) or {}
+
+
 def _overview_rows() -> dict:
     """Monta a tabela da tela principal: mercado + fundamentos + score."""
     def build():
@@ -115,7 +123,8 @@ def _overview_rows() -> dict:
             if mods.get(comp.ticker):
                 brapi = {**mods[comp.ticker], **(brapi or {})}
             snap = metrics.market_snapshot(comp.ticker, series.get(comp.ticker, []), brapi, fund)
-            mult = metrics.multiples(fund, snap, brapi)
+            por_fonte = metrics.multiplos_por_fonte(fund, snap, brapi, _ltm(comp.cd_cvm))
+            mult = por_fonte["auto"]
             sc = scoring.score(fund.get("indicadores", {}), fund.get("financial", False))
             base = fund.get("base") or {}
             ind = fund.get("indicadores") or {}
@@ -131,6 +140,8 @@ def _overview_rows() -> dict:
                 "market_cap": snap.get("market_cap"),
                 "perf": snap.get("perf"),
                 "multiples": mult,
+                # As outras fontes, para o seletor da tela (o "auto" é `multiples`).
+                "multiplos": {f: m for f, m in por_fonte.items() if f != "auto"},
                 "score": sc.get("total"),
                 "score_band": scoring.band(sc.get("total")),
                 "grade": scoring.grade(sc.get("total")),
@@ -169,6 +180,8 @@ def _overview_rows() -> dict:
         return {
             "rows": rows,
             "sector_stats": _sector_stats(rows),
+            "sector_stats_fontes": {f: _sector_stats(rows, f) for f in metrics.FONTES
+                                    if f != "auto"},
             "demo": DEMO_MODE,
             "cvm_disponivel": cvm.available(),
         }
@@ -176,7 +189,8 @@ def _overview_rows() -> dict:
     # v5: a linha ganhou valor (EPV), porte e qualidade. Sem o bump, quem já
     # tem o blob antigo veria a mesa dizer que não tem o dado que existe.
     # v6: múltiplos da BRAPI (12 meses) com a fonte de cada um.
-    return _com_diagnostico(cache.memoize("overview:v6", TTL_QUOTE, build) or {"rows": []})
+    # v7: múltiplos por fonte (BRAPI, CVM 12 meses, CVM exercício) e medianas idem.
+    return _com_diagnostico(cache.memoize("overview:v7", TTL_QUOTE, build) or {"rows": []})
 
 
 def _epv_da_linha(fund: dict, snap: dict, macro_data: dict,
@@ -221,8 +235,12 @@ def _com_diagnostico(payload: dict) -> dict:
     return out
 
 
-def _sector_stats(rows: list[dict]) -> dict:
-    """Mediana dos múltiplos e do score por setor, para comparação de pares."""
+def _sector_stats(rows: list[dict], fonte: str = "auto") -> dict:
+    """Mediana dos múltiplos e do score por setor, para comparação de pares.
+
+    `fonte` escolhe o pacote de múltiplos da linha: a mediana tem de sair da
+    mesma fonte que a tabela está mostrando.
+    """
     out: dict[str, dict] = {}
     keys = ["pl", "pvp", "ev_ebitda", "dy", "roe", "mg_ebitda", "nd_ebitda"]
     for sector in universe.SECTORS:
@@ -231,7 +249,9 @@ def _sector_stats(rows: list[dict]) -> dict:
             continue
         stats: dict[str, Optional[float]] = {}
         for key in keys:
-            vals = [r["multiples"].get(key) for r in grupo]
+            vals = [(r["multiples"] if fonte == "auto"
+                     else (r.get("multiplos") or {}).get(fonte) or {}).get(key)
+                    for r in grupo]
             vals = [v for v in vals if v is not None and -1e6 < v < 1e6]
             # P/L e EV/EBITDA negativos não entram na mediana do setor:
             # empresa com prejuízo distorce a referência de "caro/barato".
@@ -639,7 +659,9 @@ def api_company(ticker: str):
     series = market.price_series([ticker]).get(ticker, [])
     brapi = market.brapi_fundamentals(ticker) or market.brapi_quotes([ticker]).get(ticker)
     snap = metrics.market_snapshot(ticker, series, brapi, fund)
-    mult = metrics.multiples(fund, snap, brapi)
+    ltm = _ltm(comp.cd_cvm)
+    por_fonte = metrics.multiplos_por_fonte(fund, snap, brapi, ltm)
+    mult = por_fonte["auto"]
     sc = scoring.score(fund.get("indicadores", {}), fund.get("financial", False))
     macro_data = market.macro()
     # O regime vem antes das premissas: é ele que diz se a média de 3 anos
@@ -655,19 +677,21 @@ def api_company(ticker: str):
         "fundamentals": fund,
         "market": snap,
         "multiples": mult,
+        "multiplos": {f: m for f, m in por_fonte.items() if f != "auto"},
         "score": sc,
         "assumptions": prem,
         "macro": macro_data,
         "sector_stats": stats,
         "sector_label": universe.SECTORS[comp.sector]["label"],
         "peers": [{"ticker": p["ticker"], "name": p["name"], "score": p["score"],
-                   "multiples": p["multiples"], "price": p["price"], "perf": p["perf"]}
+                   "multiples": p["multiples"], "multiplos": p.get("multiplos") or {},
+                   "price": p["price"], "perf": p["perf"]}
                   for p in pares],
         "price_series": [{"d": d, "p": p} for d, p in series[-500:]],
         "consenso": _consenso(brapi),
         "itr": cvm.latest_quarter(comp.cd_cvm),
         "trimestral": cvm.quarterly_series(comp.cd_cvm),
-        "ltm": cvm.ltm_series(comp.cd_cvm),
+        "ltm": ltm,
         # DRE de leitura: as tabelas da página nova (spec 4.3). Vem montada do
         # backend porque a montagem é contábil — códigos de conta, D&A da DFC,
         # desacumulação do ITR —, não formatação.
