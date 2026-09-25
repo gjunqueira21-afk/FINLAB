@@ -24,7 +24,8 @@
     zona.innerHTML = '';
     if (!msg) return;
     zona.appendChild(h('div', { class: 'callout ' + (tom || 'warn') }, msg));
-    setTimeout(() => { if (zona.firstChild) zona.innerHTML = ''; }, 8000);
+    // Erro fica na tela até a próxima ação: some sozinho só o aviso neutro.
+    if (tom !== 'bad') setTimeout(() => { if (zona.firstChild) zona.innerHTML = ''; }, 8000);
   }
 
   function slotAtivo() {

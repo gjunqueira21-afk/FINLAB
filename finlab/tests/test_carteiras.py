@@ -325,3 +325,25 @@ def test_deep_recusa_vazio_e_path_traversal(sandbox):
     with pytest.raises(ValueError):
         deep.salvar("../..", "x")
     assert deep.ler("../../../etc/passwd") is None
+
+
+# ---------------------------------------------------------------------------
+# Windows — o painel roda no PC do usuário, onde não existe fcntl
+# ---------------------------------------------------------------------------
+
+def test_lock_funciona_sem_fcntl_como_no_windows(sandbox, monkeypatch):
+    chamadas = []
+
+    class FakeMsvcrt:
+        LK_LOCK, LK_UNLCK = 1, 0
+
+        @staticmethod
+        def locking(fd, modo, n):
+            chamadas.append(modo)
+
+    monkeypatch.setattr(carteiras, "_fcntl", None)
+    monkeypatch.setattr(carteiras, "_msvcrt", FakeMsvcrt)
+    c = carteira_padrao(sandbox)
+    assert carteiras.obter(c["id"])["nome"] == "Qualidade BR"
+    assert chamadas and chamadas[0] == FakeMsvcrt.LK_LOCK
+    assert chamadas.count(FakeMsvcrt.LK_LOCK) == chamadas.count(FakeMsvcrt.LK_UNLCK)
