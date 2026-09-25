@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const { fmt, api, el, qs, qsa, h, esc, isNum, signClass } = window.FL;
+  const { fmt, api, el, qs, qsa, h, esc, isNum, signClass, janelaMultiplo } = window.FL;
   const E = window.FLEngine;
   const C = window.FLChart;
 
@@ -76,7 +76,7 @@
           miniStat('Dia', fmt.pctSigned(perf.day), 'último pregão', signClass(perf.day)),
           miniStat('12 meses', fmt.pctSigned(perf.m12), 'retorno', signClass(perf.m12)),
           miniStat('Valor de mercado', fmt.big(m.market_cap, 1), m.market_cap_source || '—'),
-          miniStat('P/L', fmt.mult(mu.pl), 'sobre o exercício-base'),
+          miniStat('P/L', fmt.mult(mu.pl), janelaMultiplo(mu, 'pl') || 'sobre o exercício-base'),
           miniStat('Dív.Líq/EBITDA', f.financial ? 'n/a' : fmt.mult(mu.nd_ebitda, 2), 'alavancagem')
         ])
       ])
@@ -174,7 +174,8 @@
                    to: c.alvo_medio, color: '#60A5FA' });
     }
 
-    // Mediana dos P/L dos pares aplicada ao LPA do exercício-base; a faixa é
+    // Mediana dos P/L dos pares aplicada ao LPA da mesma janela do P/L da
+    // tela (12 meses pela BRAPI ou o exercício da CVM); a faixa é
     // o min–max entre os pares. Só com lucro dos dois lados: P/L de prejuízo
     // não é múltiplo, e LPA negativo tornaria a linha um absurdo.
     const lpa = (d.multiples || {}).lpa;
@@ -374,7 +375,10 @@
               + `<b style="color:var(--paper)">${fmt.pct(sc.cobertura, 0)}</b>.<br>`
               + 'Cada indicador vira nota 0–100 por interpolação entre âncoras de mercado; os '
               + 'pilares entram com peso fixo. Indicador ausente não pune nem premia: o peso é '
-              + 'redistribuído dentro do pilar e a cobertura cai.'
+              + 'redistribuído dentro do pilar e a cobertura cai.<br>'
+              + `Os indicadores da nota saem do exercício ${esc(String(state.data.fundamentals.last_year || '—'))} `
+              + 'na CVM — por isso o ROE daqui pode diferir do ROE de 12 meses (BRAPI) mostrado '
+              + 'na comparação com os pares.'
               + (sc.parcial ? '<br><b style="color:var(--amber)">Nota parcial:</b> menos de 60% '
                 + 'dos indicadores têm dado na base da CVM.' : '')
           })

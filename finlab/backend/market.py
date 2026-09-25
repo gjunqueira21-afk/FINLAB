@@ -379,12 +379,14 @@ def brapi_history(ticker: str, rng: str = "1y") -> list[tuple[str, float]]:
 def brapi_fundamentals(ticker: str) -> Optional[dict]:
     if not BRAPI_TOKEN:
         return None
-    key = f"brapi:fund:{ticker}"
+    key = f"brapi:fund:v2:{ticker}"
 
     def fetch():
         mods = "summaryProfile,defaultKeyStatistics,financialData"
+        # `fundamental` traz o P/L e o LPA de 12 meses junto dos módulos.
         r = _SESSION.get(f"{BRAPI_BASE}/quote/{ticker}",
-                         params={"token": BRAPI_TOKEN, "modules": mods, "dividends": "true"},
+                         params={"token": BRAPI_TOKEN, "modules": mods, "dividends": "true",
+                                 "fundamental": "true"},
                          timeout=HTTP_TIMEOUT)
         r.raise_for_status()
         res = r.json().get("results") or []
@@ -393,6 +395,48 @@ def brapi_fundamentals(ticker: str) -> Optional[dict]:
         return cache.memoize(key, TTL_FUNDAMENTALS, fetch)
     except Exception:
         return None
+
+
+def brapi_multiplos(tickers: Iterable[str]) -> dict[str, dict]:
+    """Módulos de múltiplos (P/VP, EV/EBITDA, ROE, margens) para a tela inteira.
+
+    Separado de `brapi_quotes` porque muda no ritmo dos balanços, não do
+    pregão: fica 12 h em cache em vez de 5 min. Vai em lotes de 10; se o
+    plano recusar módulos em lote, cai para a consulta papel a papel (que já
+    tem cache próprio e é a mesma da página da empresa).
+    """
+    tickers = [t.upper() for t in tickers]
+    if not BRAPI_TOKEN or not tickers:
+        return {}
+    out: dict[str, dict] = {}
+    for i in range(0, len(tickers), 10):
+        chunk = tickers[i:i + 10]
+        key = "brapi:mult:" + ",".join(chunk)
+
+        def fetch(chunk=chunk):
+            r = _SESSION.get(f"{BRAPI_BASE}/quote/{','.join(chunk)}",
+                             params={"token": BRAPI_TOKEN, "fundamental": "true",
+                                     "modules": "defaultKeyStatistics,financialData"},
+                             timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+            return r.json().get("results", [])
+        try:
+            for item in cache.memoize(key, TTL_FUNDAMENTALS, fetch) or []:
+                sym = str(item.get("symbol", "")).upper()
+                if sym:
+                    out[sym] = item
+        except requests.HTTPError as e:
+            # Só recusa do plano (4xx) justifica tentar papel a papel; rede
+            # fora do ar derrubaria as 10 consultas do mesmo jeito, e devagar.
+            if e.response is None or not 400 <= e.response.status_code < 500:
+                continue
+            for tk in chunk:
+                item = brapi_fundamentals(tk)
+                if item:
+                    out[tk] = item
+        except Exception:
+            continue
+    return out
 
 
 # ---------------------------------------------------------------------------

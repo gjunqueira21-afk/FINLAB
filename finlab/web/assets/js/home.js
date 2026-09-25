@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const { fmt, api, el, h, esc, isNum, signClass, prefs } = window.FL;
+  const { fmt, api, el, h, esc, isNum, signClass, prefs, janelaMultiplo } = window.FL;
 
   const state = {
     universe: null,
@@ -209,9 +209,13 @@
     if (key === 'dy' && isNum(v) && v >= 0.06) cls += ' pos';
     if ((key === 'pl' || key === 'ev_ebitda') && isNum(v) && v < 0) cls += ' neg';
 
-    const title = (key === 'pl' && isNum(v) && v < 0) ? 'Prejuízo no exercício-base'
-      : (key === 'ev_ebitda' && isNum(v) && v < 0) ? 'EBITDA ou EV negativo no exercício-base'
+    // A célula diz de que janela saiu o número: 12 meses (BRAPI) ou o
+    // último exercício (CVM) — as duas coexistem na mesma coluna.
+    const janela = janelaMultiplo(row.multiples, key);
+    const alerta = (key === 'pl' && isNum(v) && v < 0) ? 'Prejuízo'
+      : (key === 'ev_ebitda' && isNum(v) && v < 0) ? 'EBITDA ou EV negativo'
         : null;
+    const title = [alerta, janela].filter(Boolean).join(' · ') || null;
 
     return h('td', { class: cls, title }, fmt.byType(v, fmts[key] || 'mult'));
   }
@@ -232,7 +236,10 @@
       h('th', {}, '12 meses'),
       h('th', {}, 'YTD')
     ].concat(
-      metricKeys.map((k) => h('th', { title: 'Múltiplo de referência do setor' }, labels[k] || k)),
+      metricKeys.map((k) => h('th', {
+        title: 'Múltiplo de referência do setor · últimos 12 meses (BRAPI) ou, na falta, '
+          + 'último exercício (CVM) — passe o mouse no número para ver a fonte'
+      }, labels[k] || k)),
       [h('th', { title: 'Dívida líquida sobre EBITDA do último exercício' }, labels.nd_ebitda)]
     ));
 

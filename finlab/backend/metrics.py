@@ -8,6 +8,7 @@ publicado.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from . import cvm, market, universe
@@ -220,12 +221,69 @@ def market_snapshot(ticker: str, series: list[tuple[str, float]],
     }
 
 
+def _num(v) -> Optional[float]:
+    """Número finito ou None — a BRAPI às vezes manda string, 0 ou NaN."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _campo_brapi(brapi: Optional[dict], *nomes: str) -> Optional[float]:
+    """Primeiro campo presente, no topo da cotação ou nos módulos.
+
+    Os nomes variam entre versões da API (`ebitdaMargins` × `ebitdaMargin`),
+    e o mesmo número às vezes vem em `defaultKeyStatistics`, às vezes em
+    `financialData`: procura em todos antes de desistir.
+    """
+    if not brapi:
+        return None
+    lugares = [brapi] + [brapi.get(m) for m in ("defaultKeyStatistics", "financialData")]
+    for nome in nomes:
+        for lugar in lugares:
+            if isinstance(lugar, dict):
+                v = _num(lugar.get(nome))
+                if v is not None:
+                    return v
+    return None
+
+
+def _taxa(v: Optional[float], *refs: Optional[float]) -> Optional[float]:
+    """Taxa da BRAPI (ROE, margem) sempre como fração: 0,213 = 21,3%.
+
+    A API entrega umas taxas em fração e outras em pontos percentuais (o DY
+    vem em pontos), e o dicionário dela não diz qual é qual. Em vez de
+    adivinhar, a escala é a que fica mais perto de uma referência da mesma
+    grandeza: LPA ÷ VPA da própria BRAPI, ou a conta anual da CVM. Janela
+    diferente muda o número em alguns pontos, nunca em 100 vezes.
+    """
+    if v is None:
+        return None
+    if v == 0:
+        return 0.0
+    for ref in refs:
+        if ref is not None and ref != 0:
+            return min((v, v / 100.0), key=lambda c: abs(math.log(abs(c) / abs(ref))))
+    # Sem referência nenhuma: acima de 150% só em pontos percentuais.
+    return v / 100.0 if abs(v) > 1.5 else v
+
+
 def multiples(fund: dict, snap: dict, brapi: Optional[dict]) -> dict:
-    """Múltiplos de mercado. EV usa dívida líquida contábil da CVM."""
+    """Múltiplos de mercado: da BRAPI (12 meses) quando ela tem, senão da CVM.
+
+    A BRAPI recalcula P/L, P/VP, EV/EBITDA, ROE e margem sobre os últimos
+    quatro trimestres, então acompanha o último ITR; a conta local usa o
+    último exercício fechado (DFP). Cada múltiplo diz de onde veio em
+    `fontes`, e a interface mostra isso — misturar as duas bases sem avisar
+    é o que fazia o ROE do painel "discordar" do release da empresa.
+    Dív.Líq/EBITDA, EV/EBIT, P/Receita e FCF yield continuam na CVM.
+    """
     base = fund.get("base", {})
     ind = fund.get("indicadores", {})
     cap = snap.get("market_cap")
     fin = fund.get("financial")
+    price = snap.get("price")
 
     ev = None
     if cap is not None and not fin:
@@ -234,27 +292,76 @@ def multiples(fund: dict, snap: dict, brapi: Optional[dict]) -> dict:
 
     dy = None
     if brapi:
-        raw = brapi.get("dividendYield")
+        raw = _num(brapi.get("dividendYield"))
         if raw is not None:
             # A BRAPI devolve o DY em pontos percentuais (ex.: 8.4 = 8,4%).
-            dy = float(raw) / 100.0
+            dy = raw / 100.0
 
+    # Conta local, sobre o último exercício da CVM: é o fallback de cada campo.
     # Por papel negociado (unit, quando for o caso), para comparar com o preço.
-    lpa = div(base.get("lucro_liquido"), snap.get("shares_quote"))
-    vpa = div(base.get("patrimonio_liquido"), snap.get("shares_quote"))
-
-    return {
+    cvm_ = {
         "pl": div(cap, base.get("lucro_liquido")),
         "pvp": div(cap, base.get("patrimonio_liquido")),
         "ev_ebitda": div(ev, base.get("ebitda")),
+        "roe": ind.get("roe"),
+        "mg_ebitda": ind.get("mg_ebitda"),
+        "ev": ev,
+        "lpa": div(base.get("lucro_liquido"), snap.get("shares_quote")),
+        "vpa": div(base.get("patrimonio_liquido"), snap.get("shares_quote")),
+    }
+
+    # BRAPI, últimos 12 meses. Zero em múltiplo de preço é campo vazio, não
+    # empresa de graça.
+    lpa_b = _campo_brapi(brapi, "earningsPerShare", "trailingEps")
+    vpa_b = _campo_brapi(brapi, "bookValue")
+    pl_b = _campo_brapi(brapi, "priceEarnings", "trailingPE")
+    if pl_b is None and price and lpa_b:
+        pl_b = price / lpa_b
+    pvp_b = _campo_brapi(brapi, "priceToBook")
+    if pvp_b is None and price and vpa_b and vpa_b > 0:
+        pvp_b = price / vpa_b
+    brapi_ = {
+        "pl": pl_b or None,
+        "pvp": pvp_b or None,
+        "ev_ebitda": None if fin else (_campo_brapi(brapi, "enterpriseToEbitda") or None),
+        "roe": _taxa(_campo_brapi(brapi, "returnOnEquity"),
+                     div(lpa_b, vpa_b) if vpa_b and vpa_b > 0 else None, cvm_["roe"]),
+        "mg_ebitda": None if fin else _taxa(_campo_brapi(brapi, "ebitdaMargins", "ebitdaMargin"),
+                                             cvm_["mg_ebitda"]),
+        "ev": None if fin else (_campo_brapi(brapi, "enterpriseValue") or None),
+    }
+    # LPA e VPA acompanham o P/L e o P/VP que estão na tela: o football field
+    # multiplica o P/L dos pares pelo LPA, e as duas pontas precisam da mesma
+    # janela. Preço ÷ múltiplo é, por construção, o LPA do papel negociado.
+    brapi_["lpa"] = (price / brapi_["pl"]) if price and brapi_["pl"] else None
+    brapi_["vpa"] = (price / brapi_["pvp"]) if price and brapi_["pvp"] else None
+
+    out: dict = {}
+    fontes: dict[str, Optional[str]] = {}
+    for k in ("pl", "pvp", "ev_ebitda", "roe", "mg_ebitda", "ev", "lpa", "vpa"):
+        if brapi_[k] is not None:
+            out[k], fontes[k] = brapi_[k], "BRAPI"
+        else:
+            out[k] = cvm_[k]
+            fontes[k] = "CVM" if cvm_[k] is not None else None
+    fontes["dy"] = "BRAPI" if dy is not None else None
+    fontes["nd_ebitda"] = "CVM" if ind.get("nd_ebitda") is not None else None
+
+    return {
+        "pl": out["pl"],
+        "pvp": out["pvp"],
+        "ev_ebitda": out["ev_ebitda"],
         "ev_ebit": div(ev, base.get("ebit")),
         "psr": div(cap, base.get("receita")),
         "dy": dy,
-        "roe": ind.get("roe"),
-        "mg_ebitda": ind.get("mg_ebitda"),
+        "roe": out["roe"],
+        "mg_ebitda": out["mg_ebitda"],
         "nd_ebitda": ind.get("nd_ebitda"),
-        "ev": ev,
-        "lpa": lpa,
-        "vpa": vpa,
+        "ev": out["ev"],
+        "lpa": out["lpa"],
+        "vpa": out["vpa"],
         "fcf_yield": div(base.get("fcl"), cap),
+        # "BRAPI" = últimos 12 meses; "CVM" = exercício `ano_cvm` (DFP).
+        "fontes": fontes,
+        "ano_cvm": fund.get("last_year"),
     }
