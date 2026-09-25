@@ -4,7 +4,8 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    TZ=America/Sao_Paulo
+    TZ=America/Sao_Paulo \
+    FINLAB_DOCKER=1
 
 WORKDIR /app
 
@@ -18,7 +19,7 @@ COPY . /app
 RUN chmod +x /app/deploy/entrypoint.sh
 
 # O uvicorn só escuta dentro da rede do compose; quem fala com a
-# internet é o Caddy (HTTPS + senha).
+# internet é o proxy — o Caddy do projeto ou o Traefik da VPS (HTTPS + senha).
 EXPOSE 8777
 
 ENTRYPOINT ["/app/deploy/entrypoint.sh"]

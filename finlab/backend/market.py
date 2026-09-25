@@ -60,6 +60,9 @@ def provider_status() -> dict:
             "token_mascarado": _mascara(BRAPI_TOKEN),
             "env_path": str(ENV_FILE),
             "env_encontrado": ENV_FILE_FOUND,
+            # No Docker da VPS o token vem do deploy/.env pelo compose, não
+            # do finlab/.env — a tela precisa apontar o arquivo certo.
+            "docker": os.getenv("FINLAB_DOCKER") == "1",
         },
         "yahoo": {"label": "Yahoo Finance", "configured": True, "ok": _probe("yahoo"),
                   "em_uso": em_uso == "Yahoo Finance", "precisa_token": False},
@@ -79,6 +82,12 @@ def _mascara(token: str) -> str:
 
 def _probe(kind: str) -> Optional[bool]:
     key = f"probe:{kind}"
+    if kind == "brapi":
+        # O cache vive em disco e sobrevive ao restart: sem amarrar a chave ao
+        # token, o "não responde" gravado quando ainda não havia token (ou com
+        # um token trocado) continuaria valendo por 10 minutos depois da troca.
+        import hashlib
+        key += ":" + hashlib.sha256(BRAPI_TOKEN.encode()).hexdigest()[:12]
     hit = cache.get(key, ttl=600)
     if hit is not None:
         return hit.get("ok")

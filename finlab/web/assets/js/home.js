@@ -139,13 +139,18 @@
       // token está salvo mas no arquivo errado (ou salvo como .env.txt).
       const caminho = (prov.brapi && prov.brapi.env_path) || 'finlab/.env';
       const existe = prov.brapi && prov.brapi.env_encontrado;
+      const docker = prov.brapi && prov.brapi.docker;
       zone.appendChild(h('div', {
         class: 'callout',
         html: '<b>Rodando sem token BRAPI.</b> Cotações e performance vêm de '
           + `<b>${esc(ov.source || 'fonte alternativa')}</b> (fechamento D-1) e os fundamentos vêm `
           + 'direto das DFPs da CVM. Para preço intradiário, consenso de analistas e beta de '
-          + 'mercado, preencha <code>BRAPI_TOKEN</code> em <code>' + esc(caminho) + '</code>'
-          + (existe
+          + (docker
+            ? 'mercado, preencha <code>BRAPI_TOKEN=seu_token</code> (sem o <code>#</code>) no '
+              + '<code>deploy/.env</code> da VPS e rode <code>docker compose up -d</code> na '
+              + 'pasta <code>deploy</code>.'
+            : 'mercado, preencha <code>BRAPI_TOKEN</code> em <code>' + esc(caminho) + '</code>')
+          + (docker ? '' : existe
             ? ' — o arquivo existe, mas a variável veio vazia. Confira se a linha é '
               + '<code>BRAPI_TOKEN=seu_token</code>, sem aspas, e <b>reinicie o painel</b>: '
               + 'o <code>.env</code> só é lido quando o servidor sobe.'

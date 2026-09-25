@@ -16,5 +16,5 @@ if [ ! -f valuation_cvm/data/processed/dre_dfp.parquet ] \
     (cd valuation_cvm && python -m src.main --start-year 2016 --end-year "$ANO")
 fi
 
-echo "==> FinLab no ar (porta interna 8777; o Caddy publica com HTTPS e senha)."
+echo "==> FinLab no ar (porta interna 8777; o proxy — Caddy ou Traefik — publica com HTTPS e senha)."
 exec python -m uvicorn finlab.backend.app:app --host 0.0.0.0 --port 8777
