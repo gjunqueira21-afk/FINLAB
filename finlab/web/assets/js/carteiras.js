@@ -11,6 +11,11 @@
 
   const state = { detalhe: null };
 
+  const ROTULO_EVENTO = {
+    criacao: 'criação', rebalanceamento: 'rebalanceamento', pesos: 'composição',
+    regras: 'regras', benchmark: 'benchmark'
+  };
+
   function idDaUrl() {
     return new URLSearchParams(location.search).get('id');
   }
@@ -26,6 +31,12 @@
     zona.appendChild(h('div', { class: 'callout ' + (tom || 'warn') }, msg));
     // Erro fica na tela até a próxima ação: some sozinho só o aviso neutro.
     if (tom !== 'bad') setTimeout(() => { if (zona.firstChild) zona.innerHTML = ''; }, 8000);
+  }
+
+  /** Mandato igual ao nome não diz nada novo — não vale uma linha. */
+  function mandatoUtil(c) {
+    const m = (c.mandato || '').trim().toLowerCase();
+    return !!m && m !== (c.nome || '').trim().toLowerCase();
   }
 
   function slotAtivo() {
@@ -47,13 +58,13 @@
         h('span', { class: 'tag-pill' }, r.origem === 'mesa' ? '🧠 mesa' : '✍ manual'),
         r.n_alertas ? h('span', { class: 'tag-pill warn' }, `⚠ ${r.n_alertas} fora da banda`) : null
       ]),
-      r.mandato ? h('div', { class: 'mandato' }, r.mandato) : null,
+      mandatoUtil(r) ? h('div', { class: 'mandato' }, r.mandato) : null,
       h('div', { class: 'nums' }, [
         h('span', {}, [h('i', {}, 'cota '), h('b', {}, fmt.num(r.cota, 2))]),
         h('span', { class: signClass(r.retorno) }, fmt.pctSigned(r.retorno)),
         isNum(dif)
           ? h('span', { class: signClass(dif), title: 'diferença contra o BOVA11 desde a criação' },
-              (dif >= 0 ? '▲' : '▼') + ' ' + fmt.pctSigned(dif) + ' vs BOVA11')
+              (Math.abs(dif) < 0.0005 ? '=' : dif > 0 ? '▲' : '▼') + ' ' + fmt.pctSigned(dif) + ' vs BOVA11')
           : h('span', { class: 'mut' }, 'sem benchmark'),
         h('span', { class: 'mut' }, `${r.n_posicoes} posições`)
       ]),
@@ -232,10 +243,17 @@
         + 'diferentes (ou deixe o cron de segunda-feira trabalhar).'));
       return;
     }
+    hostEl.appendChild(h('div', { class: 'cart-legenda' }, [
+      h('span', { class: 'tt' }, 'Cota × BOVA11 · base 100'),
+      h('span', { class: 'a' }, [h('i', {}), 'carteira']),
+      h('span', { class: 'b' }, [h('i', {}), 'BOVA11 comprado no mesmo dia'])
+    ]));
+    const plot = h('div');
+    hostEl.appendChild(plot);
     const pontos = serie.map((s) => ({ x: Date.parse(s.data), y: s.cota }));
     const bench = serie.filter((s) => isNum(s.retorno_bench))
       .map((s) => ({ x: Date.parse(s.data), y: 100 * (1 + s.retorno_bench) }));
-    window.FLChart.line(hostEl, {
+    window.FLChart.line(plot, {
       height: 280,
       series: [
         { points: pontos, color: '#67E8F9', width: 2.6, label: 'carteira' },
@@ -247,10 +265,6 @@
         return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
       }
     });
-    hostEl.appendChild(h('div', { class: 'cart-legenda' }, [
-      h('span', { class: 'a' }, '— carteira (cota)'),
-      h('span', { class: 'b' }, '· · BOVA11 na mesma base 100')
-    ]));
   }
 
   function tabelaPosicoes(c) {
@@ -258,13 +272,22 @@
     const pesos = atual.pesos || {};
     const rets = atual.retornos || {};
     const banda = (c.regras && c.regras.banda) || 0.05;
+    // Sem nenhuma tese escrita, a coluna seria uma fileira de travessões:
+    // some, e a tabela encolhe para o tamanho dos números.
+    const comTese = c.posicoes.some((p) => p.tese);
+    // Escala relativa à maior posição, com folga de uma banda e meia: dá para
+    // ver o peso crescer além do alvo antes de a barra encostar no fim.
+    const maior = Math.max.apply(null, c.posicoes.map((p) =>
+      Math.max(p.peso, isNum(pesos[p.ticker]) ? pesos[p.ticker] : 0)));
+    const escala = Math.min(1, (maior + banda * 1.5) * 1.1) || 1;
 
     const head = h('tr', {}, [
       h('th', { class: 'left' }, 'Ticker'),
       h('th', {}, 'Peso alvo'), h('th', {}, 'Peso atual'),
       h('th', { title: 'desvio do peso atual contra o alvo' }, 'Desvio'),
       h('th', { title: 'retorno do papel desde o último rebalanceamento' }, 'Retorno'),
-      h('th', { class: 'left' }, 'Tese')
+      comTese ? h('th', { class: 'left' }, 'Tese')
+        : h('th', { class: 'left', title: 'barra = peso atual · traço = alvo' }, 'Composição')
     ]);
     const body = h('tbody', {}, c.posicoes.map((p) => {
       const pa = pesos[p.ticker];
@@ -279,10 +302,19 @@
         h('td', { class: 'num' }, fmt.pct(pa)),
         h('td', { class: 'num ' + (fora ? 'neg' : 'mut') }, fmt.pctSigned(drift)),
         h('td', { class: 'num ' + signClass(rets[p.ticker]) }, fmt.pctSigned(rets[p.ticker])),
-        h('td', { class: 'left tese' }, p.tese || '—')
+        comTese ? h('td', { class: 'left tese' }, p.tese || '—') : barraPeso(pa, p.peso, fora, escala)
       ]);
     }));
-    return h('table', {}, [h('thead', {}, head), body]);
+    return h('table', { class: 'cart-pos' },
+      [h('thead', {}, head), body]);
+  }
+
+  function barraPeso(atual, alvo, fora, escala) {
+    const pct = (v) => Math.max(0, Math.min(100, (v / escala) * 100)).toFixed(1) + '%';
+    return h('td', { class: 'left barra' }, h('div', { class: 'cart-barra' + (fora ? ' fora' : '') }, [
+      isNum(atual) ? h('span', { class: 'enc', style: 'width:' + pct(atual) }) : null,
+      h('span', { class: 'alvo', style: 'left:' + pct(alvo) })
+    ]));
   }
 
   function confirmarExclusao(c) {
@@ -299,10 +331,11 @@
         irPara(null);
       } catch (err) { aviso('⚠ ' + err.message, 'bad'); }
     });
-    return h('div', { class: 'cart-confirm' }, [
+    return h('details', { class: 'cart-confirm' }, [
+      h('summary', {}, 'Excluir carteira…'),
       h('div', { class: 'psub' },
-        `Excluir apaga a série inteira (${(c.serie || []).length} pontos) e o histórico de eventos. `
-        + 'Para confirmar, digite o nome da carteira:'),
+        `Apaga a série inteira (${(c.serie || []).length} ponto(s)) e o histórico de eventos — `
+        + 'não dá para desfazer. Para confirmar, digite o nome da carteira:'),
       h('div', { class: 'linha' }, [campo, btn])
     ]);
   }
@@ -391,28 +424,28 @@
       h('button', { class: 'btn ghost', onclick: () => formCarteira(c) }, '✎ Editar')
     ]));
 
-    if (c.mandato) host.appendChild(h('p', { class: 'cart-mandato' }, c.mandato));
+    if (mandatoUtil(c)) {
+      host.appendChild(h('p', { class: 'cart-mandato' }, c.mandato));
+    }
 
     (atual.avisos || []).forEach((a) => host.appendChild(h('div', { class: 'callout warn' }, '⚠ ' + a)));
 
-    host.appendChild(h('div', { class: 'kpis fit cart-stats' }, [
-      h('div', { class: 'kpi' }, [h('span', { class: 'l' }, 'cota'),
-        h('b', { class: 'v' }, fmt.num(atual.cota, 2)),
-        h('span', { class: 's' }, `base 100 em ${fmt.date(c.criada_em)}`)]),
-      h('div', { class: 'kpi ' + (isNum(atual.retorno) && atual.retorno < 0 ? 'bad' : '') }, [
-        h('span', { class: 'l' }, 'retorno'),
-        h('b', { class: 'v ' + signClass(atual.retorno) }, fmt.pctSigned(atual.retorno)),
-        h('span', { class: 's' }, 'desde a criação')]),
-      h('div', { class: 'kpi' }, [h('span', { class: 'l' }, 'vs BOVA11'),
-        h('b', { class: 'v ' + signClass(dif) }, isNum(dif) ? fmt.pctSigned(dif) : '—'),
-        h('span', { class: 's' }, isNum(atual.retorno_bench)
-          ? `índice: ${fmt.pctSigned(atual.retorno_bench)}` : 'benchmark indisponível')]),
-      h('div', { class: 'kpi ' + ((atual.alertas || []).length ? 'warn' : '') }, [
-        h('span', { class: 'l' }, 'banda'),
-        h('b', { class: 'v' }, (atual.alertas || []).length
-          ? `${atual.alertas.length} fora` : 'ok'),
-        h('span', { class: 's' },
-          `±${(((c.regras || {}).banda || 0.05) * 100).toFixed(0)} p.p. do alvo`)])
+    const tom = (v) => (!isNum(v) || Math.abs(v) < 0.0005) ? '' : (v > 0 ? 'good' : 'bad');
+    const nAlertas = (atual.alertas || []).length;
+    const kpi = (cls, rotulo, valor, sub) => h('div', { class: 'kpi ' + cls }, [
+      h('div', { class: 'l' }, rotulo),
+      h('div', { class: 'v' }, valor),
+      h('div', { class: 's' }, sub)
+    ]);
+    host.appendChild(h('div', { class: 'kpis cart-stats' }, [
+      kpi('info', 'Cota', fmt.num(atual.cota, 2), `base 100 em ${fmt.date(c.criada_em)}`),
+      kpi(tom(atual.retorno), 'Retorno', fmt.pctSigned(atual.retorno), 'desde a criação'),
+      kpi(tom(dif), 'vs BOVA11', isNum(dif) ? fmt.pctSigned(dif) : '—',
+        isNum(atual.retorno_bench)
+          ? `índice no período: ${fmt.pctSigned(atual.retorno_bench)}` : 'benchmark indisponível'),
+      kpi(nAlertas ? 'warn' : 'good', 'Banda',
+        nAlertas ? `${nAlertas} fora` : 'dentro',
+        `alerta a ±${(((c.regras || {}).banda || 0.05) * 100).toFixed(0)} p.p. do alvo`)
     ]));
 
     (atual.alertas || []).forEach((a) =>
@@ -445,7 +478,7 @@
       host.appendChild(h('div', { class: 'cart-eventos' }, eventos.map((e) =>
         h('div', { class: 'ev' }, [
           h('span', { class: 'quando' }, fmt.date(e.data)),
-          h('span', { class: 'tipo' }, e.tipo),
+          h('span', { class: 'tipo' }, ROTULO_EVENTO[e.tipo] || e.tipo),
           h('span', {}, e.texto)
         ]))));
     }

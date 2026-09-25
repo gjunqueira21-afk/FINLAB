@@ -69,6 +69,11 @@ except ZoneInfoNotFoundError:
     _TZ = timezone(timedelta(hours=-3))
 
 
+def _pct_br(v: float) -> str:
+    """0.357 → '35,7%': a tela e a lâmina falam vírgula decimal."""
+    return f"{v:.1%}".replace(".", ",")
+
+
 def _hoje() -> str:
     return datetime.now(_TZ).date().isoformat()
 
@@ -427,8 +432,8 @@ def _snapshot(c: dict, precos: dict[str, dict], bench: Optional[dict],
     for p in c["posicoes"]:
         drift = pesos_atuais.get(p["ticker"], p["peso"]) - p["peso"]
         if abs(drift) > banda:
-            alertas.append(f"{p['ticker']}: peso {pesos_atuais[p['ticker']]:.1%} "
-                           f"vs alvo {p['peso']:.1%} — fora da banda de "
+            alertas.append(f"{p['ticker']}: peso {_pct_br(pesos_atuais[p['ticker']])} "
+                           f"vs alvo {_pct_br(p['peso'])} — fora da banda de "
                            f"{banda * 100:.0f} p.p.")
 
     # Benchmark: série própria, ancorada na criação. Fonte falhou hoje →
