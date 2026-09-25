@@ -1,0 +1,12 @@
+# Complemento do modo Traefik quando ele roda numa rede Docker (não em
+# network_mode: host): o FinLab entra nessa rede para o Traefik alcançá-lo.
+services:
+  finlab:
+    networks:
+      - default
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: ${TRAEFIK_REDE}
