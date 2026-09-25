@@ -3326,3 +3326,16 @@ def test_erro_do_provedor_nao_perde_a_call(tmp_path, monkeypatch):
     assert "401" in r["mensagem"]
     assert [c["protocolo"] for c in bapp.api_calls("WEGE3")["calls"]] \
         == ["call-2026-08-07"]
+
+
+# ---------------------------------------------------------------------------
+# Resposta JSON — NaN de dado faltando não pode derrubar a página
+# ---------------------------------------------------------------------------
+
+def test_resposta_troca_nan_e_inf_por_null(caplog):
+    from finlab.backend.app import JSONSeguro, app
+    corpo = JSONSeguro({"a": float("nan"), "b": [1.5, float("inf")],
+                        "c": {"d": float("-inf"), "e": "ok"}}).body
+    assert json.loads(corpo) == {"a": None, "b": [1.5, None], "c": {"d": None, "e": "ok"}}
+    assert "c.d" in caplog.text and "b[1]" in caplog.text
+    assert app.router.default_response_class is JSONSeguro
