@@ -5,7 +5,8 @@
 (function (global) {
   'use strict';
 
-  const { fmt, el, h, isNum, janelaMultiplo } = global.FL;
+  const { fmt, el, h, isNum, janelaMultiplo, multiplosDe, seletorFonte,
+    fonteMultiplos, FONTES_MULTIPLOS } = global.FL;
 
   let dados = () => ({});
   let universo = () => ({});
@@ -182,19 +183,19 @@
     const pares = (d.peers || []).filter((p) => p.ticker !== f.ticker);
     const eu = {
       ticker: f.ticker, name: f.name, score: (d.score || {}).total,
-      multiples: d.multiples, liquidez: null
+      multiples: d.multiples, multiplos: d.multiplos, liquidez: null
     };
 
     function celula(p, chave) {
       if (chave === '__liq') {
         return isNum(p.liquidez) && p.liquidez > 0 ? fmt.bigShort(p.liquidez, 1) : fmt.dash;
       }
-      return fmt.byType(p.multiples ? p.multiples[chave] : null, fmts[chave]);
+      return fmt.byType(multiplosDe(p)[chave], fmts[chave]);
     }
 
     // Tooltip com a janela de cada número: 12 meses (BRAPI) ou exercício (CVM).
     function td(p, chave) {
-      return h('td', { title: janelaMultiplo(p.multiples, chave) }, celula(p, chave));
+      return h('td', { title: janelaMultiplo(multiplosDe(p), chave) }, celula(p, chave));
     }
 
     const linhaEmpresa = h('tr', { class: 'hero' }, [
@@ -220,7 +221,7 @@
     // própria empresa), para a comparação não se comparar consigo mesma.
     const medianas = {};
     colunas.forEach(([k]) => {
-      const valores = pares.map((p) => (p.multiples ? p.multiples[k] : null));
+      const valores = pares.map((p) => multiplosDe(p)[k]);
       // Múltiplo de preço negativo não entra na mediana: empresa com prejuízo
       // distorceria a referência de caro/barato.
       medianas[k] = medianaDe(PARES_RELATIVO[k] ? valores.filter((v) => isNum(v) && v > 0)
@@ -235,7 +236,7 @@
              [h('td', {}, isNum(medianas.__score) ? fmt.num(medianas.__score, 1) : fmt.dash)]));
 
     function delta(chave) {
-      const meu = d.multiples ? d.multiples[chave] : null;
+      const meu = multiplosDe(d)[chave];
       const med = medianas[chave];
       if (!isNum(meu) || !isNum(med)) return { texto: fmt.dash, classe: 'mut' };
       if (PARES_RELATIVO[chave]) {
@@ -267,13 +268,18 @@
     }), [h('td', { class: isNum(difScore) ? (difScore >= 0 ? 'pos' : 'neg') : 'mut' },
       isNum(difScore) ? (difScore >= 0 ? '+' : '') + fmt.num(difScore, 0) : fmt.dash)]));
 
-    host.appendChild(h('div', { class: 'panel-h' }, h('div', {}, [
+    const fonte = (FONTES_MULTIPLOS.find((x) => x.key === fonteMultiplos()) || {});
+    const rotuloFonte = {
+      auto: 'fonte automática', brapi: '12 meses · BRAPI',
+      cvm_12m: '12 meses · CVM (ITR)', cvm_exercicio: 'último exercício · CVM (DFP)'
+    }[fonte.key] || '';
+    host.appendChild(h('div', { class: 'panel-h' }, [h('div', {}, [
       h('div', { class: 'ptitle' }, [h('b', {}, 'Múltiplos contra os pares'),
-        ' · ' + (d.sector_label || '') + ', últimos 12 meses']),
+        ' · ' + (d.sector_label || '') + ', ' + rotuloFonte]),
       h('div', { class: 'psub' },
         'a linha de prêmio/desconto compara com a mediana dos pares — o resto '
         + 'da tabela explica o porquê')
-    ])));
+    ]), d.bdr ? null : seletorFonte({ class: 'sel-fonte mini' })]));
 
     host.appendChild(h('div', { class: 'table-wrap' }, h('table', {}, [
       h('thead', {}, h('tr', {}, [h('th', { class: 'left' }, 'Empresa')]
@@ -291,9 +297,10 @@
           + 'crescimento o preço de hoje exige. As colunas de ROE, margem e saúde mostram o '
           + 'que sustenta o múltiplo — a simulação diz se é suficiente. Medianas calculadas '
           + 'só com valores positivos em P/L, P/VP e EV/EBITDA: empresa com prejuízo '
-          + 'distorceria a referência de caro/barato. P/L, P/VP, EV/EBITDA, ROE e margem são '
-          + 'dos últimos 12 meses (BRAPI) e, quando ela não tem o dado, do último exercício na '
-          + 'CVM; Dív.Líq/EBITDA é sempre da CVM. Passe o mouse no número para ver a fonte.'
+          + 'distorceria a referência de caro/barato. A fonte de P/L, P/VP, EV/EBITDA, ROE e '
+          + 'margem é a do seletor acima: BRAPI (12 meses), CVM 12 meses (ITRs), CVM último '
+          + 'exercício (DFP) ou automático (BRAPI, e a CVM onde ela não tem o dado). '
+          + 'Dív.Líq/EBITDA é sempre da CVM. Passe o mouse no número para ver a fonte.'
         : '<b>Sem pares carregados para este ativo.</b> A comparação setorial precisa das '
           + 'demonstrações das outras empresas do setor, que este painel não carrega aqui.'
     }));

@@ -269,49 +269,49 @@ def _taxa(v: Optional[float], *refs: Optional[float]) -> Optional[float]:
     return v / 100.0 if abs(v) > 1.5 else v
 
 
-def multiples(fund: dict, snap: dict, brapi: Optional[dict]) -> dict:
-    """Múltiplos de mercado: da BRAPI (12 meses) quando ela tem, senão da CVM.
+# As fontes que o usuário escolhe na tela. "auto" é a mistura: cada múltiplo
+# da primeira fonte que o tiver, na ordem de FONTES_AUTO.
+FONTES = ("auto", "brapi", "cvm_12m", "cvm_exercicio")
+FONTES_AUTO = ("brapi", "cvm_12m", "cvm_exercicio")
+_TAG = {"brapi": "BRAPI", "cvm_12m": "CVM12", "cvm_exercicio": "CVM"}
+_CHAVES = ("pl", "pvp", "ev_ebitda", "ev_ebit", "psr", "roe", "mg_ebitda",
+           "nd_ebitda", "ev", "lpa", "vpa", "fcf_yield")
+# Estes a BRAPI não publica: em qualquer fonte escolhida, saem da CVM.
+_SO_CVM = ("nd_ebitda", "ev_ebit", "psr", "fcf_yield")
 
-    A BRAPI recalcula P/L, P/VP, EV/EBITDA, ROE e margem sobre os últimos
-    quatro trimestres, então acompanha o último ITR; a conta local usa o
-    último exercício fechado (DFP). Cada múltiplo diz de onde veio em
-    `fontes`, e a interface mostra isso — misturar as duas bases sem avisar
-    é o que fazia o ROE do painel "discordar" do release da empresa.
-    Dív.Líq/EBITDA, EV/EBIT, P/Receita e FCF yield continuam na CVM.
+
+def _pacote_cvm(v: dict, snap: dict, fin: bool) -> dict:
+    """Múltiplos sobre um conjunto de contas da CVM (exercício ou 12 meses).
+
+    `v` traz fluxos (lucro, receita, EBITDA, EBIT, FCL) e saldos (PL, dívida
+    líquida) da mesma janela; o preço é sempre o de agora.
     """
-    base = fund.get("base", {})
-    ind = fund.get("indicadores", {})
     cap = snap.get("market_cap")
-    fin = fund.get("financial")
-    price = snap.get("price")
-
-    ev = None
-    if cap is not None and not fin:
-        nd = base.get("divida_liquida")
-        ev = cap + nd if nd is not None else None
-
-    dy = None
-    if brapi:
-        raw = _num(brapi.get("dividendYield"))
-        if raw is not None:
-            # A BRAPI devolve o DY em pontos percentuais (ex.: 8.4 = 8,4%).
-            dy = raw / 100.0
-
-    # Conta local, sobre o último exercício da CVM: é o fallback de cada campo.
-    # Por papel negociado (unit, quando for o caso), para comparar com o preço.
-    cvm_ = {
-        "pl": div(cap, base.get("lucro_liquido")),
-        "pvp": div(cap, base.get("patrimonio_liquido")),
-        "ev_ebitda": div(ev, base.get("ebitda")),
-        "roe": ind.get("roe"),
-        "mg_ebitda": ind.get("mg_ebitda"),
+    lucro, pl = v.get("lucro_liquido"), v.get("patrimonio_liquido")
+    ebitda, nd = v.get("ebitda"), v.get("divida_liquida")
+    ev = (cap + nd) if (cap is not None and nd is not None and not fin) else None
+    return {
+        "pl": div(cap, lucro),
+        "pvp": div(cap, pl),
+        "ev_ebitda": div(ev, ebitda),
+        "ev_ebit": div(ev, v.get("ebit")),
+        "psr": div(cap, v.get("receita")),
+        "roe": div(lucro, pl),
+        "mg_ebitda": None if fin else div(ebitda, v.get("receita")),
+        "nd_ebitda": None if fin else div(nd, ebitda),
         "ev": ev,
-        "lpa": div(base.get("lucro_liquido"), snap.get("shares_quote")),
-        "vpa": div(base.get("patrimonio_liquido"), snap.get("shares_quote")),
+        # Por papel negociado (unit, quando for o caso), para comparar com o preço.
+        "lpa": div(lucro, snap.get("shares_quote")),
+        "vpa": div(pl, snap.get("shares_quote")),
+        "fcf_yield": div(v.get("fcl"), cap),
     }
 
-    # BRAPI, últimos 12 meses. Zero em múltiplo de preço é campo vazio, não
-    # empresa de graça.
+
+def _pacote_brapi(brapi: Optional[dict], snap: dict, fin: bool,
+                  refs: dict) -> dict:
+    """Múltiplos de 12 meses como a BRAPI publica. Zero em múltiplo de preço
+    é campo vazio, não empresa de graça."""
+    price = snap.get("price")
     lpa_b = _campo_brapi(brapi, "earningsPerShare", "trailingEps")
     vpa_b = _campo_brapi(brapi, "bookValue")
     pl_b = _campo_brapi(brapi, "priceEarnings", "trailingPE")
@@ -320,48 +320,96 @@ def multiples(fund: dict, snap: dict, brapi: Optional[dict]) -> dict:
     pvp_b = _campo_brapi(brapi, "priceToBook")
     if pvp_b is None and price and vpa_b and vpa_b > 0:
         pvp_b = price / vpa_b
-    brapi_ = {
+    out = dict.fromkeys(_CHAVES)
+    out.update({
         "pl": pl_b or None,
         "pvp": pvp_b or None,
         "ev_ebitda": None if fin else (_campo_brapi(brapi, "enterpriseToEbitda") or None),
         "roe": _taxa(_campo_brapi(brapi, "returnOnEquity"),
-                     div(lpa_b, vpa_b) if vpa_b and vpa_b > 0 else None, cvm_["roe"]),
+                     div(lpa_b, vpa_b) if vpa_b and vpa_b > 0 else None,
+                     refs.get("roe")),
         "mg_ebitda": None if fin else _taxa(_campo_brapi(brapi, "ebitdaMargins", "ebitdaMargin"),
-                                             cvm_["mg_ebitda"]),
+                                             refs.get("mg_ebitda")),
         "ev": None if fin else (_campo_brapi(brapi, "enterpriseValue") or None),
-    }
+    })
     # LPA e VPA acompanham o P/L e o P/VP que estão na tela: o football field
     # multiplica o P/L dos pares pelo LPA, e as duas pontas precisam da mesma
     # janela. Preço ÷ múltiplo é, por construção, o LPA do papel negociado.
-    brapi_["lpa"] = (price / brapi_["pl"]) if price and brapi_["pl"] else None
-    brapi_["vpa"] = (price / brapi_["pvp"]) if price and brapi_["pvp"] else None
+    out["lpa"] = (price / out["pl"]) if price and out["pl"] else None
+    out["vpa"] = (price / out["pvp"]) if price and out["pvp"] else None
+    return out
 
-    out: dict = {}
-    fontes: dict[str, Optional[str]] = {}
-    for k in ("pl", "pvp", "ev_ebitda", "roe", "mg_ebitda", "ev", "lpa", "vpa"):
-        if brapi_[k] is not None:
-            out[k], fontes[k] = brapi_[k], "BRAPI"
-        else:
-            out[k] = cvm_[k]
-            fontes[k] = "CVM" if cvm_[k] is not None else None
-    fontes["dy"] = "BRAPI" if dy is not None else None
-    fontes["nd_ebitda"] = "CVM" if ind.get("nd_ebitda") is not None else None
 
-    return {
-        "pl": out["pl"],
-        "pvp": out["pvp"],
-        "ev_ebitda": out["ev_ebitda"],
-        "ev_ebit": div(ev, base.get("ebit")),
-        "psr": div(cap, base.get("receita")),
-        "dy": dy,
-        "roe": out["roe"],
-        "mg_ebitda": out["mg_ebitda"],
-        "nd_ebitda": ind.get("nd_ebitda"),
-        "ev": out["ev"],
-        "lpa": out["lpa"],
-        "vpa": out["vpa"],
-        "fcf_yield": div(base.get("fcl"), cap),
-        # "BRAPI" = últimos 12 meses; "CVM" = exercício `ano_cvm` (DFP).
-        "fontes": fontes,
-        "ano_cvm": fund.get("last_year"),
+def multiplos_por_fonte(fund: dict, snap: dict, brapi: Optional[dict],
+                        ltm: Optional[dict] = None) -> dict[str, dict]:
+    """Os múltiplos em cada fonte que o usuário pode escolher na tela.
+
+      * ``brapi``         — últimos 12 meses como a BRAPI publica;
+      * ``cvm_12m``       — últimos 12 meses dos ITRs da CVM (oficial);
+      * ``cvm_exercicio`` — último exercício fechado, DFP da CVM (oficial);
+      * ``auto``          — cada múltiplo da primeira fonte que o tiver, nessa
+        ordem (a BRAPI cobre mais papéis; a CVM é o fallback oficial).
+
+    Cada pacote diz em ``fontes`` de onde saiu cada número, porque as janelas
+    dão números diferentes para o mesmo ROE — o que fazia o painel "discordar"
+    do release. Dív.Líq/EBITDA, EV/EBIT, P/Receita e FCF yield a BRAPI não
+    publica: saem da CVM mesmo com a BRAPI escolhida. DY só a BRAPI tem.
+    """
+    fin = bool(fund.get("financial"))
+    base = fund.get("base", {}) or {}
+    campos_ltm = (ltm or {}).get("campos") or {}
+
+    brutos = {
+        "cvm_exercicio": _pacote_cvm(base, snap, fin),
+        "cvm_12m": _pacote_cvm(campos_ltm, snap, fin) if campos_ltm else dict.fromkeys(_CHAVES),
     }
+    # A referência de escala das taxas da BRAPI: a conta mais recente da CVM.
+    refs = {k: (brutos["cvm_12m"].get(k) if brutos["cvm_12m"].get(k) is not None
+                else brutos["cvm_exercicio"].get(k)) for k in ("roe", "mg_ebitda")}
+    brutos["brapi"] = _pacote_brapi(brapi, snap, fin, refs)
+
+    dy = None
+    if brapi:
+        raw = _num(brapi.get("dividendYield"))
+        if raw is not None:
+            # A BRAPI devolve o DY em pontos percentuais (ex.: 8.4 = 8,4%).
+            dy = raw / 100.0
+
+    comum = {"dy": dy, "ano_cvm": fund.get("last_year"),
+             "ltm_fim": (ltm or {}).get("fim"), "ltm_rotulo": (ltm or {}).get("rotulo")}
+
+    def escolhe(ordem: tuple[str, ...]) -> dict:
+        out: dict = {}
+        fontes: dict[str, Optional[str]] = {}
+        for k in _CHAVES:
+            origem = next((f for f in ordem if brutos[f].get(k) is not None), None)
+            out[k] = brutos[origem][k] if origem else None
+            fontes[k] = _TAG[origem] if origem else None
+        # LPA/VPA seguem a fonte do P/L/P/VP, para as duas pontas do football
+        # field ficarem na mesma janela mesmo quando a mistura é campo a campo.
+        for par, mult in (("lpa", "pl"), ("vpa", "pvp")):
+            origem = next((f for f, t in _TAG.items() if t == fontes[mult]), None)
+            out[par] = brutos[origem][par] if origem else out[par]
+            fontes[par] = fontes[mult] if origem and out[par] is not None else fontes[par]
+        fontes["dy"] = "BRAPI" if dy is not None else None
+        return {**out, **comum, "fontes": fontes}
+
+    # Fonte escolhida é fonte respeitada: sem o dado nela, fica vazio —
+    # exceto o que só a CVM publica, que na BRAPI vem da CVM mais recente.
+    so_brapi = escolhe(("brapi",))
+    cvm_recente = escolhe(("cvm_12m", "cvm_exercicio"))
+    for k in _SO_CVM:
+        so_brapi[k] = cvm_recente[k]
+        so_brapi["fontes"][k] = cvm_recente["fontes"][k]
+    return {
+        "auto": escolhe(FONTES_AUTO),
+        "brapi": so_brapi,
+        "cvm_12m": escolhe(("cvm_12m",)),
+        "cvm_exercicio": escolhe(("cvm_exercicio",)),
+    }
+
+
+def multiples(fund: dict, snap: dict, brapi: Optional[dict],
+              ltm: Optional[dict] = None) -> dict:
+    """Os múltiplos da fonte automática (ver `multiplos_por_fonte`)."""
+    return multiplos_por_fonte(fund, snap, brapi, ltm)["auto"]
