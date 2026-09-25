@@ -52,10 +52,22 @@ if [ -n "$TRAEFIK" ]; then
     TRAEFIK_ENTRYPOINT=${TRAEFIK_ENTRYPOINT:-websecure}
     TRAEFIK_CERTRESOLVER=${TRAEFIK_CERTRESOLVER:-letsencrypt}
 
+    # Traefik em network_mode: host não está em rede Docker nenhuma: ele
+    # alcança os contêineres pelas redes bridge do host, então o FinLab
+    # fica na rede do próprio projeto.
+    if [ "$TRAEFIK_REDE" = host ] || [ -z "$TRAEFIK_REDE" ]; then
+        TRAEFIK_REDE=finlab_default
+        TRAEFIK_HOST=1
+        echo "   (o Traefik roda na rede do servidor — modo host)"
+    else
+        TRAEFIK_HOST=0
+    fi
     echo "   rede: $TRAEFIK_REDE · entrypoint HTTPS: $TRAEFIK_ENTRYPOINT · certificado: $TRAEFIK_CERTRESOLVER"
     read -r -p "   Está certo? [S/n] " OK
     if [ "${OK:-S}" != "S" ] && [ "${OK:-S}" != "s" ]; then
         read -r -p "   Rede do Traefik [$TRAEFIK_REDE]: " X; TRAEFIK_REDE=${X:-$TRAEFIK_REDE}
+        if [ "$TRAEFIK_REDE" = host ]; then TRAEFIK_REDE=finlab_default; TRAEFIK_HOST=1; fi
+        if [ "$TRAEFIK_REDE" = finlab_default ]; then TRAEFIK_HOST=1; else TRAEFIK_HOST=0; fi
         read -r -p "   Entrypoint HTTPS [$TRAEFIK_ENTRYPOINT]: " X; TRAEFIK_ENTRYPOINT=${X:-$TRAEFIK_ENTRYPOINT}
         read -r -p "   Resolvedor de certificado [$TRAEFIK_CERTRESOLVER]: " X; TRAEFIK_CERTRESOLVER=${X:-$TRAEFIK_CERTRESOLVER}
     fi
@@ -102,9 +114,13 @@ FINLAB_USUARIO=$USUARIO
 FINLAB_SENHA_HASH='$HASH'
 FIM
 if [ "$MODO" = traefik ]; then
+    COMPOSE_TRAEFIK=docker-compose.yml:docker-compose.traefik.yml
+    if [ "$TRAEFIK_HOST" = 0 ]; then
+        COMPOSE_TRAEFIK=$COMPOSE_TRAEFIK:docker-compose.traefik-rede.yml
+    fi
     cat >> .env <<FIM
 # Modo Traefik: o FinLab se pendura no proxy que já atende 80/443.
-COMPOSE_FILE=docker-compose.yml:docker-compose.traefik.yml
+COMPOSE_FILE=$COMPOSE_TRAEFIK
 TRAEFIK_REDE=$TRAEFIK_REDE
 TRAEFIK_ENTRYPOINT=$TRAEFIK_ENTRYPOINT
 TRAEFIK_CERTRESOLVER=$TRAEFIK_CERTRESOLVER

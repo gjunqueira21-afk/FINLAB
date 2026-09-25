@@ -87,7 +87,10 @@ portas 80/443. O `instalar.sh` detecta isso sozinho e **não sobe o Caddy** —
 o FinLab entra na rede do Traefik e se anuncia por labels (domínio, HTTPS e
 senha), sem tocar nas outras aplicações. Ele descobre a rede, o entrypoint
 HTTPS e o resolvedor de certificado do Traefik que está rodando e pede
-confirmação antes de seguir. A escolha fica gravada no `deploy/.env`
+confirmação antes de seguir. Funciona com o Traefik numa rede Docker (o
+FinLab entra nela) e com o Traefik em `network_mode: host`, que é o caso da
+Hostinger (aí a rede aparece como `finlab_default`: o Traefik alcança o
+FinLab pela rede do próprio projeto). A escolha fica gravada no `deploy/.env`
 (`COMPOSE_FILE=…traefik.yml`), então `atualizar.sh` e os crons continuam
 iguais.
 

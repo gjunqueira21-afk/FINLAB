@@ -1,16 +1,16 @@
 # Modo Traefik: a VPS já tem um Traefik nas portas 80/443 (o proxy padrão da
-# Hostinger, que publica as outras aplicações). O FinLab entra na rede dele e
-# se anuncia por labels — domínio, HTTPS e senha — sem subir um Caddy próprio.
+# Hostinger, que publica as outras aplicações). O FinLab se anuncia a ele por
+# labels — domínio, HTTPS e senha — sem subir um Caddy próprio.
 #
-# Ativado pelo instalar.sh, que grava no deploy/.env:
-#   COMPOSE_FILE=docker-compose.yml:docker-compose.traefik.yml
-# e descobre sozinho a rede, o entrypoint HTTPS e o resolvedor de certificado
-# do Traefik que já está rodando.
+# Ativado pelo instalar.sh, que grava COMPOSE_FILE no deploy/.env e descobre
+# sozinho a rede, o entrypoint HTTPS e o resolvedor de certificado do Traefik.
+# TRAEFIK_REDE é a rede Docker por onde o Traefik alcança o FinLab:
+#   • Traefik em rede Docker → a rede dele; o FinLab entra nela pelo
+#     docker-compose.traefik-rede.yml, somado ao COMPOSE_FILE;
+#   • Traefik com network_mode: host (caso da Hostinger) → finlab_default,
+#     a rede do próprio projeto: o host enxerga as redes bridge diretamente.
 services:
   finlab:
-    networks:
-      - default
-      - proxy
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_REDE}
@@ -21,8 +21,3 @@ services:
       - traefik.http.routers.finlab.middlewares=finlab-auth
       - traefik.http.middlewares.finlab-auth.basicauth.users=${FINLAB_USUARIO}:${FINLAB_SENHA_HASH}
       - traefik.http.services.finlab.loadbalancer.server.port=8777
-
-networks:
-  proxy:
-    external: true
-    name: ${TRAEFIK_REDE}
