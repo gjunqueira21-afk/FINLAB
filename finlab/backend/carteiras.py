@@ -49,7 +49,7 @@ except ImportError:                   # Windows: o painel também roda local
     _fcntl = None
     import msvcrt as _msvcrt
 
-from . import market, universe
+from . import bdrs, etfs, market, universe
 from .settings import DATA_DIR
 
 DIR_CARTEIRAS = DATA_DIR / "carteiras"
@@ -57,6 +57,7 @@ BENCHMARK = "BOVA11"
 COTA_INICIAL = 100.0
 BANDA_PADRAO = 0.05          # 5 p.p. de desvio antes do alerta
 MAX_POSICOES = 25
+MAX_CARTEIRAS = 10
 MAX_SNAPSHOTS = 1500         # ~6 anos de pregões; além disso, apara do início
 MAX_EVENTOS = 200
 MAX_ATRASO_DIAS = 7          # preço mais velho que isso não abre carteira
@@ -196,6 +197,9 @@ def _resumo(c: dict) -> dict:
         "retorno_bench": atual.get("retorno_bench"),
         "atualizada_em": atual.get("data"),
         "n_alertas": len(atual.get("alertas") or []),
+        "n_alvos": sum(1 for a in (atual.get("alvos") or {}).values()
+                       if a.get("atingido")),
+        "serie_curta": [s["cota"] for s in (c.get("snapshots") or [])[-30:]],
     }
 
 
@@ -216,6 +220,8 @@ def detalhe(c: dict) -> dict:
                    "retorno_bench": s.get("retorno_bench")}
                   for s in (c.get("snapshots") or [])],
         "eventos": (c.get("eventos") or [])[-50:],
+        "janelas": janelas_de_retorno(c.get("snapshots") or []),
+        "metricas": metricas_da_serie(c.get("snapshots") or []),
     }
 
 
@@ -230,6 +236,18 @@ def _ultimo_ponto(pontos: list) -> Optional[dict]:
     return {"p": float(p), "d": str(d)[:10]}
 
 
+def _series_precos(tickers: list[str]) -> dict:
+    """Ações pela fachada de ações; BDR/ETF pela de ativos à vista."""
+    acoes = [t for t in tickers if universe.get(t)]
+    outros = [t for t in tickers if not universe.get(t)]
+    series: dict = {}
+    if acoes:
+        series.update(market.price_series(acoes))
+    if outros:
+        series.update(market.asset_series(outros))
+    return series
+
+
 def _precos_atuais(tickers: list[str], exigir_frescor: bool = False) -> dict[str, dict]:
     """Último preço de cada ticker, COM a data dele.
 
@@ -239,7 +257,7 @@ def _precos_atuais(tickers: list[str], exigir_frescor: bool = False) -> dict[str
     a operação — abrir carteira sobre preço de semana passada é abrir outra
     carteira.
     """
-    series = market.price_series(tickers)
+    series = _series_precos(tickers)
     precos: dict[str, dict] = {}
     limite = MAX_ATRASO_DIAS
     hoje = datetime.now(_TZ).date()
@@ -304,14 +322,20 @@ def _normaliza_posicoes(posicoes: list) -> list[dict]:
         if not tk or peso is None or peso <= 0:
             raise CarteiraInvalida(f"Posição inválida: {p!r} — precisa de ticker "
                                    "e peso positivo.")
-        if universe.get(tk) is None:
+        if universe.get(tk) is None and bdrs.get(tk) is None and etfs.get(tk) is None:
             raise CarteiraInvalida(
-                f"{tk} está fora do universo coberto pelo painel — a carteira "
-                "só acompanha o que o painel consegue precificar e fundamentar.")
+                f"{tk} está fora do universo coberto (ações B3, BDRs e ETFs do painel).")
         if tk in vistos:
             raise CarteiraInvalida(f"{tk} aparece duas vezes na carteira.")
         vistos.add(tk)
-        limpas.append({"ticker": tk, "peso": peso,
+        alvo_raw = (p or {}).get("alvo")
+        alvo = None
+        if alvo_raw not in (None, ""):
+            alvo = _num(alvo_raw)
+            if alvo is None or alvo <= 0:
+                raise CarteiraInvalida(
+                    f"Target price inválido em {tk}: use um número positivo em reais.")
+        limpas.append({"ticker": tk, "peso": peso, "alvo": alvo,
                        "tese": str((p or {}).get("tese") or "").strip()[:600]})
 
     soma = sum(p["peso"] for p in limpas)
@@ -347,6 +371,9 @@ def _normaliza_banda(valor, obrigatoria: bool = False) -> Optional[float]:
 def criar(payload: dict) -> dict:
     """Cria a carteira: valida, captura os preços de partida e o 1º snapshot."""
     payload = payload or {}
+    if len(listar()) >= MAX_CARTEIRAS:
+        raise CarteiraInvalida(
+            f"Limite de {MAX_CARTEIRAS} carteiras atingido — exclua uma para criar outra.")
     nome = str(payload.get("nome") or "").strip()[:80]
     if not nome:
         raise CarteiraInvalida("Dê um nome à carteira.")
@@ -469,6 +496,17 @@ def _snapshot(c: dict, precos: dict[str, dict], bench: Optional[dict],
         avisos.append(f"{BENCHMARK} indisponível nesta rodada — comparação "
                       "congelada no último ponto.")
 
+    alvos = {}
+    for p in c["posicoes"]:
+        alvo = p.get("alvo")
+        p1 = (precos.get(p["ticker"]) or {}).get("p")
+        if isinstance(alvo, (int, float)) and alvo > 0 and p1:
+            alvos[p["ticker"]] = {
+                "alvo": alvo, "preco": p1,
+                "atingido": p1 >= alvo,
+                "distancia": round(alvo / p1 - 1, 6),   # upside até o alvo
+            }
+
     c["atual"] = {
         "data": data_snap,
         "cota": cota,
@@ -480,6 +518,7 @@ def _snapshot(c: dict, precos: dict[str, dict], bench: Optional[dict],
         "datas_precos": {tk: v["d"] for tk, v in precos.items()},
         "alertas": alertas,
         "avisos": avisos,
+        "alvos": alvos,
     }
 
     ponto = {"data": data_snap, "cota": cota,
@@ -530,7 +569,7 @@ def atualizar(carteira_id: str) -> dict:
         if c is None:
             raise KeyError(carteira_id)
         tickers = [p["ticker"] for p in c["posicoes"]]
-        series = market.price_series(tickers)
+        series = _series_precos(tickers)
         fonte = {tk: _ultimo_ponto(series.get(tk) or []) for tk in tickers}
         precos, avisos = _precos_para_update(c, fonte)
         _snapshot(c, precos, _ponto_benchmark(), avisos)
@@ -553,7 +592,7 @@ def atualizar_todas() -> list[dict]:
         c = obter(r["id"])
         if c:
             todos.update(p["ticker"] for p in c.get("posicoes") or [])
-    series = market.price_series(sorted(todos)) if todos else {}
+    series = _series_precos(sorted(todos)) if todos else {}
     precos_globais = {tk: _ultimo_ponto(series.get(tk) or []) for tk in todos}
     bench = _ponto_benchmark()
 
@@ -795,8 +834,8 @@ def lamina_md(c: dict) -> str:
 
     L.append("## Posições")
     L.append("")
-    L.append("| Ticker | Peso alvo | Peso atual | Desvio | Retorno* | Contribuição* |")
-    L.append("|---|---|---|---|---|---|")
+    L.append("| Ticker | Peso alvo | Peso atual | Desvio | Retorno* | Target | Upside | Contribuição* |")
+    L.append("|---|---|---|---|---|---|---|---|")
     for p in sorted(c["posicoes"], key=lambda x: -x["peso"]):
         tk = p["ticker"]
         pa = pesos.get(tk)
@@ -804,10 +843,14 @@ def lamina_md(c: dict) -> str:
         marca = " ⚠" if isinstance(drift, (int, float)) and abs(drift) > banda else ""
         ret = rets.get(tk)
         contrib = p["peso"] * ret if isinstance(ret, (int, float)) else None
+        alvo_info = (atual.get("alvos") or {}).get(tk) or {}
+        alvo_txt = (f"R$ {alvo_info['alvo']:.2f}"
+                    + (" ❗" if alvo_info.get("atingido") else "")) if alvo_info else "—"
+        up_txt = _pct(alvo_info.get("distancia")) if alvo_info else "—"
         L.append(f"| {tk} | {p['peso'] * 100:.1f}% | "
                  + (f"{pa * 100:.1f}%" if isinstance(pa, (int, float)) else "—")
                  + f" | {_pct(drift) if drift is not None else '—'}{marca} | "
-                 + f"{_pct(ret)} | {_pct(contrib, 2)} |")
+                 + f"{_pct(ret)} | {alvo_txt} | {up_txt} | {_pct(contrib, 2)} |")
     L.append("")
     L.append(f"*\\* retorno e contribuição (peso alvo × retorno, em p.p. da "
              f"cota) desde o último rebalanceamento ({_dmy(c['base']['data'])}).*")
