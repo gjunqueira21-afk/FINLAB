@@ -1,66 +1,71 @@
-# 🧠 FinLab
+# 🧠 FinLab V2
 
-Monitor fundamentalista e valuation interativo de ações da B3, sobre as demonstrações
-da CVM.
+Painel fundamentalista da B3 para **bankers de assessoria**: screening de 90 ações
+por saúde financeira, análise de **endividamento** com comparação de pares, BDRs,
+ETFs com gráfico por janela de tempo e **carteiras simuladas** com target price.
+Construído sobre as demonstrações oficiais da CVM + BRAPI.
 
-```bash
-git clone https://github.com/gjunqueira21-afk/EPS-VALUE-DASHBOARD-.git
-cd EPS-VALUE-DASHBOARD-
-```
+## O que tem
 
-**Windows** (PowerShell ou Prompt de Comando):
+- **Ações** — screening por setor: cotação, janelas de performance (dia/semana/3m/12m/YTD),
+  múltiplos por setor com fonte selecionável (BRAPI 12m · CVM 12m · CVM exercício) e
+  nota de saúde financeira 0–100 explicável, pilar a pilar.
+- **Página da empresa** — fundamentos atuais (múltiplos TTM + 10 anos de DFP/ITR),
+  **análise de endividamento** (Dív.Líq/EBITDA, cobertura de juros, curto × longo prazo,
+  liquidez imediata, custo aparente — tudo contra a mediana do setor) e tabela de pares.
+- **BDRs** — mesma página, fundamentos na moeda de reporte (USD) via Yahoo/BRAPI.
+- **ETFs** — tese, taxa de administração, liquidez real da B3 e gráfico de preço com
+  janelas 1m · 3m · 6m · 12m · YTD · máx.
+- **Carteiras** — até 10 carteiras simuladas (ações, BDRs e ETFs), cota base 100,
+  benchmark BOVA11, pesos com banda de alerta, **target price por posição com aviso ❗**,
+  lâmina de fundo, atualização diária e todo o histórico de operações salvo.
+
+Saiu nesta versão: a mesa de IA e o valuation interativo (DCF/EPV) da v1.
+
+## Como rodar
 
 ```powershell
-.\finlab\iniciar.bat
+python -m venv .venv
+.venv\Scripts\python -m pip install fastapi "uvicorn[standard]" pandas pyarrow requests python-dotenv pytest httpx
+
+# base CVM (primeira vez e a cada trimestre; demora — baixa os dados da CVM):
+cd valuation_cvm
+..\.venv\Scripts\python -m src.main --start-year 2016
+cd ..
+
+# token BRAPI (plano pago recomendado) em finlab\.env:
+#   BRAPI_TOKEN=seu_token
+
+.venv\Scripts\python -m uvicorn finlab.backend.app:app --port 8777
 ```
 
-**Linux / macOS:**
+Abre em <http://127.0.0.1:8777>. Sem token BRAPI o painel funciona com
+Yahoo/PulseFlat (fechamento D-1) e avisa na tela.
 
-```bash
-./finlab/iniciar.sh
+## Atualização diária das carteiras
+
+```powershell
+.venv\Scripts\python -m finlab.backend.tarefas atualizar-carteiras --lamina
 ```
 
-Abre em <http://127.0.0.1:8777>. Funciona sem nenhuma chave de API.
-Requer Python 3.10+ no PATH — no Windows, marque *"Add python.exe to PATH"* na
-instalação, senão o script avisa e para.
+No Windows, agende no **Agendador de Tarefas** apontando para
+`.venv\Scripts\python.exe` com os argumentos acima e "Iniciar em" na pasta do projeto
+(dias úteis, após o fechamento do pregão).
 
-- **Ações** — 90 ações em 11 setores: cotação do dia, performance de semana,
-  3 meses, 12 meses e YTD, os múltiplos que fazem sentido para cada setor e dívida
-  líquida/EBITDA, ordenadas da empresa financeiramente mais sólida para a mais frágil.
-- **Painel da empresa** — DCF e EPV recalculando ao vivo nos sliders, régua de
-  sensibilidade, matriz WACC × perpetuidade, 10 anos de demonstrações, comparação com
-  pares e uma mesa de quatro analistas de IA.
-- **ETFs** — todos os fundos de índice da B3, por categoria: tese, taxa de administração
-  e liquidez real (volume do boletim da B3), com painel próprio por fundo.
-- **BDRs** — empresas globais na B3, separadas pelos setores GICS em inglês; clicou,
-  abre o painel de valuation completo (fundamentos em USD via Yahoo Finance).
-- **Mesa de IA** — até 4 slots de LLM (OpenRouter, OpenAI, Anthropic, Google, Groq,
-  DeepSeek), com os modelos da sua chave listados direto da API do provedor, e uma
-  caixa de conversa (`Ctrl+K`) onde a mesa inteira debate e fecha com uma conclusão.
+## Testes
 
-📖 **Documentação completa: [`finlab/README.md`](finlab/README.md)** — metodologia do
-score, convenções do modelo de valuation, fontes de dados e limites conhecidos.
+```powershell
+.venv\Scripts\python -m pytest finlab/tests -q
+```
 
-## Estrutura do repositório
+## Estrutura
 
 | Pasta | O que é |
 |---|---|
 | `finlab/` | O painel: backend FastAPI + front-end sem dependências externas |
-| `valuation_cvm/` | Pipeline que baixa e processa as DFPs da CVM, e o dashboard Streamlit original |
-
-O FinLab lê os parquets gerados pelo pipeline. Para atualizar a base:
-
-```bash
-cd valuation_cvm && python -m src.main --start-year 2016
-```
-
-## Testes
-
-```bash
-python -m pytest finlab/tests -q
-```
+| `valuation_cvm/` | Pipeline que baixa e processa as demonstrações da CVM (parquets) |
 
 ---
 
 **Isto não é recomendação de investimento.** É uma ferramenta de análise sobre dados
-públicos, com todas as premissas abertas e editáveis.
+públicos, com todas as premissas abertas.

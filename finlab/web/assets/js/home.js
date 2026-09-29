@@ -267,7 +267,7 @@
         [metricCell(row, 'nd_ebitda')]
       ));
 
-      tr.title = `${row.name} · exercício-base ${row.last_year || '—'} · clique para abrir o valuation`;
+      tr.title = `${row.name} · exercício-base ${row.last_year || '—'} · clique para abrir a análise`;
       tr.addEventListener('click', () => goTo(row.ticker));
       tr.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); goTo(row.ticker); }
