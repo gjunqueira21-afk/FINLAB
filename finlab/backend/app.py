@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import carteiras  # noqa: F401  (rotas abaixo)
-from . import b3data, bdrs, cache, cvm, etfs, market, metrics, scoring, universe
+from . import b3data, bdrs, cache, cvm, divida, etfs, market, metrics, scoring, universe
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
 
 _log = logging.getLogger("finlab")
@@ -381,6 +381,103 @@ def api_company(ticker: str):
                 "trimestral": cvm.dre_trimestral(comp.cd_cvm)},
         "source": snap.get("price_source"),
     }
+
+
+@app.get("/api/company/{ticker}/divida")
+def api_company_divida(ticker: str):
+    """Análise de endividamento: histórico CVM + retrato mais recente."""
+    ticker = ticker.upper().strip()
+    comp = universe.get(ticker)
+    bdr = bdrs.get(ticker) if comp is None else None
+    if comp is None and bdr is None:
+        raise HTTPException(status_code=404, detail=f"Ticker fora do universo: {ticker}")
+
+    if comp is not None:
+        fund = _fundamentals(ticker)
+        financial = bool(fund.get("financial"))
+    else:
+        payload = _bdr_payload(ticker)
+        fund = payload["fundamentals"]
+        financial = bool(fund.get("financial"))
+
+    if financial:
+        return {"ticker": ticker, "financial": True, "anos": [], "series": {},
+                "atual": {}, "setor": {}, "avisos": [
+                    "Instituição financeira: alavancagem se lê por Ativo/PL e "
+                    "capital regulatório, não por dívida líquida/EBITDA."]}
+
+    anos = fund.get("years") or []
+    calc = divida.indicadores(anos, fund.get("series") or {})
+
+    avisos = []
+    if not anos:
+        avisos.append("Sem demonstrações processadas da CVM para este ticker — "
+                      "rode o pipeline em valuation_cvm.")
+
+    # Retrato mais recente: saldo do último ITR quando existir, senão o da DFP.
+    atual = {}
+    ltm = _ltm(comp.cd_cvm) if comp is not None else {}
+    campos = (ltm or {}).get("campos") or {}
+    if campos.get("divida_liquida") is not None:
+        nd = None
+        if campos.get("ebitda"):
+            nd = campos["divida_liquida"] / campos["ebitda"]
+        atual = {"divida_liquida": campos.get("divida_liquida"),
+                 "divida_bruta": campos.get("divida_bruta"),
+                 "caixa_total": campos.get("caixa_total"),
+                 "nd_ebitda": nd,
+                 "fonte": "CVM · ITR", "rotulo": (ltm or {}).get("rotulo")}
+    elif anos:
+        i = len(anos) - 1
+        atual = {"divida_liquida": calc["series"]["divida_liquida"][i],
+                 "divida_bruta": calc["series"]["divida_bruta"][i],
+                 "caixa_total": calc["series"]["caixa_total"][i],
+                 "nd_ebitda": calc["series"]["nd_ebitda"][i],
+                 "fonte": "CVM · DFP", "rotulo": f"exercício {anos[i]}"}
+
+    # Mediana do setor (só para ações B3): ND/EBITDA do overview + cobertura
+    # calculada dos fundamentos dos pares (cache de 24h já absorve o custo).
+    setor = {}
+    if comp is not None:
+        stats = (_overview_rows().get("sector_stats") or {}).get(comp.sector) or {}
+        coberturas = []
+        for tk in universe.peers(ticker):
+            f = _fundamentals(tk)
+            if not f or f.get("financial"):
+                continue
+            an = f.get("years") or []
+            if not an:
+                continue
+            c = divida.indicadores(an, f.get("series") or {})
+            v = c["series"]["cobertura_juros"][-1]
+            if v is not None:
+                coberturas.append(v)
+        coberturas.sort()
+        setor = {"nd_ebitda": stats.get("nd_ebitda"),
+                 "cobertura_juros": (coberturas[len(coberturas) // 2]
+                                     if coberturas else None),
+                 "n": stats.get("n")}
+
+    return {"ticker": ticker, "financial": False, "anos": anos,
+            "series": calc["series"], "atual": atual, "setor": setor,
+            "avisos": avisos}
+
+
+@app.get("/api/company/{ticker}/pares")
+def api_company_pares(ticker: str):
+    """Pares do setor com as linhas completas do overview — a empresa junto."""
+    ticker = ticker.upper().strip()
+    comp = universe.get(ticker)
+    if comp is None:
+        raise HTTPException(status_code=404,
+                            detail=f"Pares por setor só para as ações B3: {ticker}")
+    ov = _overview_rows()
+    rows = [dict(r, eu=(r["ticker"] == ticker))
+            for r in ov.get("rows", []) if r["sector"] == comp.sector]
+    return {"setor": comp.sector,
+            "sector_label": universe.SECTORS[comp.sector]["label"],
+            "stats": (ov.get("sector_stats") or {}).get(comp.sector, {}),
+            "rows": rows}
 
 
 def _consenso(brapi: Optional[dict]) -> dict:
