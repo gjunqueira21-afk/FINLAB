@@ -41,6 +41,25 @@
 
   /* -------------------------------------------------------------- lista */
 
+  function sparkline(cotas) {
+    if (!cotas || cotas.length < 2) return null;
+    const min = Math.min.apply(null, cotas), max = Math.max.apply(null, cotas);
+    const W = 110, H = 28, span = (max - min) || 1;
+    const pts = cotas.map((c, i) =>
+      `${(i / (cotas.length - 1) * W).toFixed(1)},${(H - 3 - (c - min) / span * (H - 6)).toFixed(1)}`);
+    const cor = cotas[cotas.length - 1] >= cotas[0] ? '#34D399' : '#F87171';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('class', 'cart-spark');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    path.setAttribute('points', pts.join(' '));
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', cor);
+    path.setAttribute('stroke-width', '1.8');
+    svg.appendChild(path);
+    return svg;
+  }
+
   function cardCarteira(r) {
     const dif = (isNum(r.retorno) && isNum(r.retorno_bench))
       ? r.retorno - r.retorno_bench : null;
@@ -51,10 +70,13 @@
     }, [
       h('div', { class: 'topo' }, [
         h('b', { class: 'nome' }, r.nome),
-        h('span', { class: 'tag-pill' }, r.origem === 'mesa' ? '🧠 mesa' : '✍ manual'),
+        h('span', { class: 'tag-pill' }, r.origem === 'mesa' ? '🧠 legado' : '✍ manual'),
+        r.n_alvos ? h('span', { class: 'tag-pill good', title: 'posições que atingiram o target price' },
+          '❗ ' + r.n_alvos + ' no alvo') : null,
         r.n_alertas ? h('span', { class: 'tag-pill warn' }, `⚠ ${r.n_alertas} fora da banda`) : null
       ]),
       mandatoUtil(r) ? h('div', { class: 'mandato' }, r.mandato) : null,
+      sparkline(r.serie_curta),
       h('div', { class: 'nums' }, [
         h('span', {}, [h('i', {}, 'cota '), h('b', {}, fmt.num(r.cota, 2))]),
         h('span', { class: signClass(r.retorno) }, fmt.pctSigned(r.retorno)),
@@ -88,7 +110,9 @@
     const barra = h('div', { class: 'toolbar' }, [
       h('h2', { style: 'font-size:17px' }, 'Carteiras acompanhadas'),
       h('span', { style: 'flex:1 1 auto' }),
-      h('button', { class: 'btn primary', onclick: () => formCarteira(null) }, '＋ Nova carteira manual')
+      (dados.carteiras || []).length >= 10
+        ? h('span', { class: 'psub' }, 'limite de 10 carteiras atingido — exclua uma para criar outra')
+        : h('button', { class: 'btn primary', onclick: () => formCarteira(null) }, '＋ Nova carteira')
     ]);
     host.appendChild(barra);
 
@@ -118,6 +142,9 @@
                      maxlength: '7', spellcheck: 'false' }),
         h('input', { class: 'peso', placeholder: 'peso %', type: 'number', step: 'any',
                      value: p ? String(Math.round(p.peso * 1000) / 10) : '' }),
+        h('input', { class: 'alvo', placeholder: 'target R$', type: 'number', step: 'any',
+                     title: 'target price (opcional): a lâmina marca ❗ quando o preço o atinge',
+                     value: p && isNum(p.alvo) ? String(p.alvo) : '' }),
         h('input', { class: 'tese', placeholder: 'tese (opcional, 1-2 frases)',
                      value: p ? (p.tese || '') : '' }),
         h('button', { class: 'btn ghost sm', title: 'Remover',
@@ -151,6 +178,8 @@
         posicoes: Array.from(posicoes).map((row) => ({
           ticker: row.querySelector('.tk').value.trim().toUpperCase(),
           peso: parseFloat(row.querySelector('.peso').value),
+          alvo: row.querySelector('.alvo').value.trim()
+            ? parseFloat(row.querySelector('.alvo').value) : null,
           tese: row.querySelector('.tese').value.trim()
         })).filter((p) => p.ticker && isNum(p.peso)),
         regras: {}
@@ -255,6 +284,8 @@
       h('th', {}, 'Peso alvo'), h('th', {}, 'Peso atual'),
       h('th', { title: 'desvio do peso atual contra o alvo' }, 'Desvio'),
       h('th', { title: 'retorno do papel desde o último rebalanceamento' }, 'Retorno'),
+      h('th', { title: 'target price definido na carteira' }, 'Target'),
+      h('th', { title: 'distância do preço atual até o target' }, 'Upside'),
       comTese ? h('th', { class: 'left' }, 'Tese')
         : h('th', { class: 'left', title: 'barra = peso atual · traço = alvo' }, 'Composição')
     ]);
@@ -271,6 +302,16 @@
         h('td', { class: 'num' }, fmt.pct(pa)),
         h('td', { class: 'num ' + (fora ? 'neg' : 'mut') }, fmt.pctSigned(drift)),
         h('td', { class: 'num ' + signClass(rets[p.ticker]) }, fmt.pctSigned(rets[p.ticker])),
+        (function () {
+          const a = ((c.atual || {}).alvos || {})[p.ticker];
+          return h('td', { class: 'num' },
+            a ? 'R$ ' + fmt.num(a.alvo, 2) + (a.atingido ? ' ❗' : '') : '—');
+        })(),
+        (function () {
+          const a = ((c.atual || {}).alvos || {})[p.ticker];
+          return h('td', { class: 'num ' + (a ? signClass(a.distancia) : 'mut') },
+            a ? fmt.pctSigned(a.distancia) : '—');
+        })(),
         comTese ? h('td', { class: 'left tese' }, p.tese || '—') : barraPeso(pa, p.peso, fora, escala)
       ]);
     }));
@@ -345,8 +386,11 @@
 
     host.appendChild(h('div', { class: 'toolbar' }, [
       h('a', { class: 'btn ghost sm', href: '/carteiras' }, '← carteiras'),
-      h('h2', { style: 'font-size:17px' }, c.nome),
-      h('span', { class: 'tag-pill' }, c.origem === 'mesa' ? '🧠 proposta da mesa' : '✍ manual'),
+      h('div', {}, [
+        h('h2', { style: 'font-size:17px;margin:0' }, c.nome),
+        h('div', { class: 'psub' }, 'lâmina da carteira · base 100 em ' + fmt.date(c.criada_em)
+          + (mandatoUtil(c) ? ' · ' + c.mandato : ''))
+      ]),
       h('span', { style: 'flex:1 1 auto' }),
       btnAtualizar, btnRebal,
       h('a', { class: 'btn', href: '/api/carteiras/' + encodeURIComponent(c.id) + '/lamina.md',
@@ -354,10 +398,6 @@
         '📄 Lâmina'),
       h('button', { class: 'btn ghost', onclick: () => formCarteira(c) }, '✎ Editar')
     ]));
-
-    if (mandatoUtil(c)) {
-      host.appendChild(h('p', { class: 'cart-mandato' }, c.mandato));
-    }
 
     (atual.avisos || []).forEach((a) => host.appendChild(h('div', { class: 'callout warn' }, '⚠ ' + a)));
 
@@ -376,8 +416,21 @@
           ? `índice no período: ${fmt.pctSigned(atual.retorno_bench)}` : 'benchmark indisponível'),
       kpi(nAlertas ? 'warn' : 'good', 'Banda',
         nAlertas ? `${nAlertas} fora` : 'dentro',
-        `alerta a ±${(((c.regras || {}).banda || 0.05) * 100).toFixed(0)} p.p. do alvo`)
+        `alerta a ±${(((c.regras || {}).banda || 0.05) * 100).toFixed(0)} p.p. do alvo`),
+      kpi('info', 'Janelas', (c.janelas || []).map((j) =>
+          j.carteira !== null ? `${j.nome.toLowerCase()} ${fmt.pctSigned(j.carteira)}` : null)
+        .filter(Boolean).join(' · ') || '—', 'carteira por período'),
+      kpi('', 'Risco', isNum((c.metricas || {}).drawdown_max)
+          ? `DD ${fmt.pctSigned(c.metricas.drawdown_max)}` : '—',
+        isNum((c.metricas || {}).vol_anualizada)
+          ? `vol ${fmt.pct(c.metricas.vol_anualizada)}` : 'série curta')
     ]));
+
+    Object.entries((atual.alvos || {})).forEach(([tk, a]) => {
+      if (a.atingido) host.appendChild(h('div', { class: 'cart-band',
+        style: 'border-color:#34D399;color:#34D399' },
+        `❗ ${tk} atingiu o target price (R$ ${fmt.num(a.alvo, 2)} · preço ${fmt.num(a.preco, 2)}) — apenas aviso, nada foi executado.`));
+    });
 
     (atual.alertas || []).forEach((a) =>
       host.appendChild(h('div', { class: 'cart-band' }, '⚠ ' + a)));
