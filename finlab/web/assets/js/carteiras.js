@@ -2,12 +2,12 @@
 
    A carteira já nasceu validada no servidor; aqui é leitura, acompanhamento
    e as ações com gate humano — atualizar, rebalancear, editar, excluir
-   (digitando o nome), lâmina e research. O gráfico compara a cota com o
+   (digitando o nome) e lâmina. O gráfico compara a cota com o
    BOVA11 comprado no dia da criação, as duas séries na mesma base 100. */
 (function () {
   'use strict';
 
-  const { fmt, api, el, h, esc, isNum, signClass, markdown, loadSlots } = window.FL;
+  const { fmt, api, el, h, esc, isNum, signClass } = window.FL;
 
   const state = { detalhe: null };
 
@@ -37,10 +37,6 @@
   function mandatoUtil(c) {
     const m = (c.mandato || '').trim().toLowerCase();
     return !!m && m !== (c.nome || '').trim().toLowerCase();
-  }
-
-  function slotAtivo() {
-    return loadSlots().find((s) => s.api_key && s.model) || null;
   }
 
   /* -------------------------------------------------------------- lista */
@@ -74,25 +70,6 @@
     ]);
   }
 
-  async function listaDeep(host) {
-    let dados;
-    try { dados = await api('/api/deep'); } catch (e) { return; }
-    const arr = dados.researches || [];
-    if (!arr.length) return;
-    host.appendChild(h('section', { class: 'cart-deep' }, [
-      h('h3', {}, `📁 Deep researches arquivados (${arr.length})`),
-      h('div', { class: 'psub', style: 'margin-bottom:10px' },
-        'Toda rodada pedida como "deep research" com uma empresa aberta fica gravada em '
-        + '.md na pasta "deep empresas" do servidor.'),
-      h('div', { class: 'grade' }, arr.slice(0, 30).map((d) => h('a', {
-        class: 'linha', href: '/api/deep/' + encodeURIComponent(d.arquivo), target: '_blank'
-      }, [
-        h('b', {}, d.ticker), h('span', {}, fmt.date(d.data)),
-        h('span', { class: 'mut' }, d.arquivo)
-      ])))
-    ]));
-  }
-
   async function paginaLista() {
     const host = el('conteudo');
     host.innerHTML = '';
@@ -120,19 +97,11 @@
       host.appendChild(h('div', { class: 'cart-vazio' }, [
         h('div', { class: 'ico' }, '💼'),
         h('h3', {}, 'Nenhuma carteira ainda'),
-        h('p', {}, [
-          'O jeito mais rico de começar é pedir à mesa: abra a ',
-          h('a', { href: '/' }, 'tela de Ações'),
-          ', clique no 🧠 e peça algo como ',
-          h('code', {}, '"monte uma carteira de dividendos com 6 ações"'),
-          '. A proposta chega com pesos, teses e regras — e um botão para salvar aqui.'
-        ]),
-        h('p', {}, 'Ou monte à mão com o botão acima: você escolhe tickers, pesos e a banda de rebalanceamento.')
+        h('p', {}, 'Monte uma carteira com o botão acima: você escolhe tickers, pesos, target price e a banda de rebalanceamento.')
       ]));
     } else {
       host.appendChild(h('div', { class: 'cart-grid' }, lista.map(cardCarteira)));
     }
-    listaDeep(host);
   }
 
   /* ------------------------------------------------- formulário (manual) */
@@ -224,7 +193,7 @@
       ]),
       h('div', { class: 'psub' },
         'A banda dispara ALERTA quando um peso desvia mais que isso do alvo; as condições '
-        + 'macro/micro são anotações que entram na lâmina e no research — nada aqui executa ordem.'),
+        + 'macro/micro são anotações que entram na lâmina — nada aqui executa ordem.'),
       h('div', { class: 'acoes' }, [
         btnSalvar,
         h('button', { class: 'btn ghost', onclick: () => (editando ? irPara(c.id) : irPara(null)) },
@@ -354,41 +323,6 @@
     }
   }
 
-  async function pedirResearch(c, botao) {
-    const slot = slotAtivo();
-    if (!slot) {
-      aviso('Research usa a mesa de IA: configure uma chave em ⚙ Modelos de IA primeiro.');
-      return;
-    }
-    botao.disabled = true;
-    botao.innerHTML = '<span class="spinner"></span> o Gestor está escrevendo…';
-    try {
-      const r = await api('/api/carteiras/' + encodeURIComponent(c.id) + '/research', {
-        method: 'POST',
-        body: JSON.stringify({ slot: { provider: slot.provider, api_key: slot.api_key,
-                                       model: slot.model } })
-      });
-      botao.textContent = '📑 Research completo';
-      botao.disabled = false;
-      const zona = el('cart-research');
-      zona.innerHTML = '';
-      zona.appendChild(h('section', { class: 'cart-research' }, [
-        h('div', { class: 'topo' }, [
-          h('h3', {}, `Research · ${c.nome}`),
-          h('span', { class: 'psub' }, `${r.modelo} · arquivado no servidor como ${r.arquivo}`),
-          h('span', { style: 'flex:1 1 auto' }),
-          h('button', { class: 'btn ghost sm', onclick: () => { zona.innerHTML = ''; } }, '✕')
-        ]),
-        h('div', { class: 'corpo', html: markdown(r.texto) })
-      ]));
-      zona.scrollIntoView({ behavior: 'smooth' });
-    } catch (err) {
-      botao.disabled = false;
-      botao.textContent = '📑 Research completo';
-      aviso('⚠ ' + err.message, 'bad');
-    }
-  }
-
   function render(c) {
     const host = el('conteudo');
     host.innerHTML = '';
@@ -408,8 +342,6 @@
         acaoDetalhe(c.id, '/rebalancear', btnRebal, '⚖ Rebalancear');
       }
     });
-    const btnResearch = h('button', { class: 'btn' }, '📑 Research completo');
-    btnResearch.addEventListener('click', () => pedirResearch(c, btnResearch));
 
     host.appendChild(h('div', { class: 'toolbar' }, [
       h('a', { class: 'btn ghost sm', href: '/carteiras' }, '← carteiras'),
@@ -420,7 +352,6 @@
       h('a', { class: 'btn', href: '/api/carteiras/' + encodeURIComponent(c.id) + '/lamina.md',
                target: '_blank', title: 'A lâmina quantitativa em markdown — a mesma que o cron gera' },
         '📄 Lâmina'),
-      btnResearch,
       h('button', { class: 'btn ghost', onclick: () => formCarteira(c) }, '✎ Editar')
     ]));
 
@@ -470,8 +401,6 @@
       host.appendChild(ul);
     }
 
-    host.appendChild(h('div', { id: 'cart-research' }));
-
     const eventos = (c.eventos || []).slice().reverse();
     if (eventos.length) {
       host.appendChild(h('h3', { class: 'cart-h' }, 'Histórico'));
@@ -506,7 +435,6 @@
 
   el('brand').innerHTML = window.FL.brandHeader('Carteiras acompanhadas · cota, banda e benchmark');
   el('nav').innerHTML = window.FL.navTabs('carteiras');
-  el('btnLLM').addEventListener('click', () => window.FLSettings.open());
   el('btnAtualizarTodas').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
     btn.disabled = true;
@@ -527,10 +455,6 @@
       btn.textContent = '↻ Atualizar todas';
     }
   });
-
-  // O chat abre com o contexto da TELA DE AÇÕES: é dele que a mesa enxerga o
-  // universo inteiro e pode propor carteiras — o cartão de salvar funciona aqui.
-  window.FLChat.init({ tela: 'acoes', rotulo: 'peça uma carteira à mesa' });
 
   const id = idDaUrl();
   if (id) paginaDetalhe(id); else paginaLista();

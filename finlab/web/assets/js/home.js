@@ -457,13 +457,11 @@
       render();
     });
     el('btnRefresh').addEventListener('click', () => load(true));
-    el('btnLLM').addEventListener('click', () => window.FLSettings.open());
 
     window.addEventListener('resize', () => { /* tabelas são fluidas; nada a refazer */ });
   }
 
   renderBrand();
   bind();
-  window.FLChat.init({ tela: 'acoes', rotulo: 'as 90 ações da tela principal' });
   load(false);
 })();

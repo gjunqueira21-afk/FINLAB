@@ -642,3 +642,32 @@ def fundamentals_from_modules(bdr: Bdr, mod: Optional[dict]) -> dict:
         "bdr": True,
         "us_ticker": bdr.us_ticker,
     }
+
+
+def bdr_market(price, quote, yahoo_info) -> dict:
+    """Market cap em USD e 'ações sintéticas' (mcap ÷ preço do BDR).
+
+    O Yahoo publica o mcap já em USD; sem ele, o marketCap em BRL da BRAPI
+    convertido pela PTAX. shares sintéticas fazem lucro(USD)/shares sair
+    direto em 'por BDR em R$' — a convenção da v1.
+    """
+    from . import b3data
+
+    mcap_usd = None
+    fonte = None
+    if yahoo_info and yahoo_info.get("marketCap"):
+        try:
+            mcap_usd = float(yahoo_info["marketCap"])
+            fonte = "Yahoo Finance"
+        except (TypeError, ValueError):
+            mcap_usd = None
+    if mcap_usd is None and quote and quote.get("marketCap"):
+        try:
+            fx = b3data.usdbrl()
+            if fx:
+                mcap_usd = float(quote["marketCap"]) / fx
+                fonte = "BRAPI ÷ PTAX"
+        except (TypeError, ValueError):
+            pass
+    shares = (mcap_usd / price) if (mcap_usd and price) else None
+    return {"mcap_usd": mcap_usd, "mcap_fonte": fonte, "shares": shares}

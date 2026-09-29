@@ -1,4 +1,4 @@
-"""Testes das carteiras acompanhadas e do arquivo de deep research.
+"""Testes das carteiras acompanhadas.
 
 Rodar: python -m pytest finlab/tests/test_carteiras.py -q
 
@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from finlab.backend import carteiras, deep, market  # noqa: E402
+from finlab.backend import carteiras, market  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,6 @@ from finlab.backend import carteiras, deep, market  # noqa: E402
 @pytest.fixture()
 def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(carteiras, "DIR_CARTEIRAS", tmp_path / "carteiras")
-    monkeypatch.setattr(deep, "DIR_DEEP", tmp_path / "deep empresas")
 
     estado = {"precos": {}, "bench": None}
 
@@ -306,29 +305,6 @@ def test_remover_e_id_torto_nao_sai_da_pasta(sandbox):
 
 # ---------------------------------------------------------------------------
 # Deep research arquivado
-# ---------------------------------------------------------------------------
-
-def test_deep_salva_lista_e_le(sandbox):
-    r1 = deep.salvar("WEGE3", "# Análise\nROIC alto.", titulo="Deep da mesa")
-    r2 = deep.salvar("wege3", "Segunda do dia.")
-    assert r1["arquivo"].startswith("WEGE3-") and r1["arquivo"].endswith(".md")
-    assert r2["arquivo"] != r1["arquivo"]           # sufixo -2 no mesmo dia
-    nomes = [x["arquivo"] for x in deep.listar()]
-    assert set(nomes) == {r1["arquivo"], r2["arquivo"]}
-    corpo = deep.ler(r1["arquivo"])
-    assert "ROIC alto" in corpo and "não é recomendação" in corpo
-
-
-def test_deep_recusa_vazio_e_path_traversal(sandbox):
-    with pytest.raises(ValueError):
-        deep.salvar("WEGE3", "   ")
-    with pytest.raises(ValueError):
-        deep.salvar("../..", "x")
-    assert deep.ler("../../../etc/passwd") is None
-
-
-# ---------------------------------------------------------------------------
-# Windows — o painel roda no PC do usuário, onde não existe fcntl
 # ---------------------------------------------------------------------------
 
 def test_lock_funciona_sem_fcntl_como_no_windows(sandbox, monkeypatch):
