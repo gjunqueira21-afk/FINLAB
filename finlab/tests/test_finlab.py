@@ -1474,3 +1474,19 @@ def test_bdr_market_converte_brapi_pela_ptax(monkeypatch):
 def test_bdr_market_sem_dado_fica_vazio():
     out = bdrs.bdr_market(None, None, {})
     assert out == {"mcap_usd": None, "mcap_fonte": None, "shares": None}
+
+
+def test_series_de_divida_da_petrobras():
+    if not cvm.available():
+        pytest.skip("parquets da CVM ausentes")
+    data = cvm.annual_series("009512")
+    s = data["series"]
+    for chave in ("divida_cp", "divida_lp", "despesas_financeiras"):
+        assert chave in s, chave
+    # CP + LP == bruta onde ambos existem
+    for cp, lp, bruta in zip(s["divida_cp"], s["divida_lp"], s["divida_bruta"]):
+        if cp is not None and lp is not None and bruta is not None:
+            assert abs((cp + lp) - bruta) < 1e-3
+    # despesa financeira da Petrobras é negativa (conta de despesa) e grande
+    desp = [v for v in s["despesas_financeiras"] if v is not None]
+    assert desp and all(v < 0 for v in desp)
