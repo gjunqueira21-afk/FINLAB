@@ -1,0 +1,18 @@
+# FinLab — backend
+fastapi>=0.110
+uvicorn[standard]>=0.27
+requests>=2.31
+pandas>=2.0
+pyarrow>=14.0
+python-dotenv>=1.0
+# Fundamentos de BDRs (demonstrações do papel de origem, gratuito)
+yfinance>=0.2.40
+# Texto dos PDFs: anexo do chat e leitura do índice de documentos (puro Python)
+pypdf>=4.0
+# Planilha DCF exportada (GET /api/company/{ticker}/dcf.xlsx)
+openpyxl>=3.1
+
+# Testes (opcional): python -m pytest finlab/tests -q
+pytest>=8.0
+# Só para o teste do motor de valuation em JavaScript:
+# pip install playwright && playwright install chromium

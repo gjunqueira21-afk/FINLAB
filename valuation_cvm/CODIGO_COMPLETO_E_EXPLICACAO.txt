@@ -1,0 +1,1788 @@
+================================================================================
+  PROJETO: valuation_cvm
+  Pipeline de Dados Fundamentalistas CVM para Valuation de Empresas Brasileiras
+================================================================================
+
+ÍNDICE
+------
+1. Origem do projeto — de onde veio a ideia
+2. Como o projeto está estruturado
+3. Explicação detalhada de cada módulo
+4. Todo o código Python
+
+================================================================================
+PARTE 1 — ORIGEM DO PROJETO
+================================================================================
+
+Este projeto foi criado do zero, especificamente para esta solicitação.
+Não foi copiado nem derivado de nenhum repositório público do GitHub.
+
+Toda a lógica foi desenvolvida com base em:
+
+  a) Documentação oficial da CVM Dados Abertos:
+     https://dados.cvm.gov.br/
+     Os formatos de arquivo, nomes de colunas, estrutura de ZIPs e URLs
+     são públicos e documentados pela própria CVM.
+
+  b) Teoria de valuation clássica:
+     - EPV (Earnings Power Value): metodologia do professor Bruce Greenwald
+       da Columbia Business School. Fórmula: EPV = NOPAT / WACC.
+     - DCF (Discounted Cash Flow): metodologia padrão do mercado.
+       Usa Gordon Growth Model para o Valor Terminal.
+     - Métricas fundamentalistas (ROE, ROA, ROIC, margens): conceitos
+       padrão de análise financeira, amplamente usados por analistas.
+
+  c) Conhecimento técnico de Python para dados financeiros:
+     - Pandas/Numpy: bibliotecas padrão de ciência de dados em Python.
+     - Parquet: formato de arquivo colunar eficiente para grandes volumes.
+     - Zipfile/io: módulos nativos do Python para ler arquivos comprimidos.
+
+  Referências conceituais (não código):
+  - "Value Investing: From Graham to Buffett and Beyond" — Greenwald et al.
+  - Documentação da CVM: https://www.gov.br/cvm/
+  - Damodaran Online (NYU): referência em valuation — aswathdamodaran.com
+
+================================================================================
+PARTE 2 — ESTRUTURA DO PROJETO
+================================================================================
+
+valuation_cvm/                   ← Pasta raiz do projeto
+│
+├── requirements.txt             ← Lista de bibliotecas necessárias
+├── .env.example                 ← Exemplo de configuração
+├── .gitignore                   ← Arquivos que o Git deve ignorar
+├── README.md                    ← Documentação completa
+│
+├── data/                        ← DADOS (não vão para o GitHub)
+│   ├── raw/                     ← Arquivos brutos baixados da CVM (ZIPs, CSVs)
+│   ├── processed/               ← Dados tratados (Parquet e CSV)
+│   └── cache/                   ← Cache auxiliar
+│
+├── src/                         ← TODO O CÓDIGO PYTHON fica aqui
+│   ├── __init__.py              ← Marca a pasta como um módulo Python
+│   ├── config.py                ← Configurações, URLs e caminhos
+│   ├── logger.py                ← Sistema de log (mensagens na tela)
+│   ├── cvm_downloader.py        ← Baixa os arquivos da CVM
+│   ├── cvm_parser.py            ← Abre os ZIPs e lê os CSVs
+│   ├── cvm_cleaner.py           ← Limpa e padroniza os dados
+│   ├── company_mapper.py        ← Busca de empresas
+│   ├── financial_statements.py  ← Extrai dados financeiros de empresas
+│   ├── valuation_metrics.py     ← Calcula métricas (margens, ROE, etc.)
+│   ├── valuation_epv.py         ← Calcula EPV
+│   ├── valuation_dcf.py         ← Calcula DCF
+│   └── main.py                  ← Ponto de entrada (o que você roda no terminal)
+│
+└── notebooks/
+    └── 01_exploracao_cvm.ipynb  ← Análise exploratória no Jupyter
+
+FLUXO DE DADOS
+--------------
+
+  Internet (CVM)
+       ↓
+  cvm_downloader.py  →  baixa ZIPs para data/raw/
+       ↓
+  cvm_parser.py      →  abre os ZIPs e lê os CSVs de dentro
+       ↓
+  cvm_cleaner.py     →  limpa, normaliza datas, valores e textos
+       ↓
+  data/processed/    →  salva Parquet e CSV prontos para uso
+       ↓
+  financial_statements.py  →  você busca empresa + extrai conta
+       ↓
+  valuation_metrics.py     →  calcula margens, ROE, dívida líquida
+  valuation_epv.py         →  calcula EPV
+  valuation_dcf.py         →  calcula DCF
+
+================================================================================
+PARTE 3 — EXPLICAÇÃO DETALHADA DE CADA MÓDULO
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 1: config.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  É o "mapa" do projeto. Define onde tudo fica e de onde vem.
+
+VARIÁVEIS PRINCIPAIS:
+  BASE_DIR       → A pasta raiz do projeto (calculada automaticamente)
+  RAW_DIR        → Onde os ZIPs brutos ficam: data/raw/
+  PROCESSED_DIR  → Onde os Parquets ficam: data/processed/
+  CACHE_DIR      → Cache auxiliar: data/cache/
+
+  CVM_CADASTRO_URL → URL do CSV de cadastro de empresas na CVM
+  CVM_ZIP_URL_TEMPLATES → URLs dos ZIPs de ITR e DFP por ano
+
+  TIPOS_DOC      → ["ITR", "DFP"] — tipos de documentos aceitos
+  DEMONSTRATIVOS → ["DRE", "BPA", "BPP", "DFC_MI"] — demonstrativos
+  COLUNAS_TEXTO  → Colunas que NUNCA devem virar número (CNPJ, etc.)
+  CSV_SEP        → ";" (separador dos CSVs da CVM)
+  CSV_ENCODING   → "latin1" (encoding dos arquivos da CVM)
+
+FUNÇÕES:
+  create_directories()   → Cria todas as pastas se não existirem
+  get_zip_url()          → Monta a URL: ex. ".../dfp_cia_aberta_2024.zip"
+  get_zip_filename()     → Retorna o nome do arquivo ZIP local
+  get_zip_path()         → Retorna o caminho completo do ZIP salvo
+  get_processed_path()   → Retorna onde fica o Parquet processado
+
+POR QUE EXISTE:
+  Para não repetir URLs e caminhos em vários arquivos. Se a CVM mudar
+  a URL, você muda só aqui e o resto funciona automaticamente.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 2: logger.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Controla as mensagens que aparecem na tela quando você roda o pipeline.
+  Em vez de usar "print()", o projeto usa "logger.info()" para mensagens
+  mais organizadas com data, hora e nível de severidade.
+
+EXEMPLO DO QUE APARECE NA TELA:
+  2024-06-01 14:32:10 | INFO     | valuation_cvm | Download concluído: dfp_2024.zip
+  2024-06-01 14:32:11 | WARNING  | valuation_cvm | Arquivo não encontrado (404)
+  2024-06-01 14:32:12 | ERROR    | valuation_cvm | Erro de conexão ao baixar ...
+
+NÍVEIS DE LOG:
+  DEBUG   → Mensagens técnicas detalhadas (desativado por padrão)
+  INFO    → Operações normais (download, leitura, salvamento)
+  WARNING → Algo não ideal mas o programa continua (arquivo ausente)
+  ERROR   → Algo deu errado mas não parou tudo
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 3: cvm_downloader.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Baixa os arquivos da CVM para o seu computador.
+
+FUNÇÕES PRINCIPAIS:
+
+  _download_file(url, dest_path, force_download)
+    → Função interna que faz o download real.
+    → Verifica se o arquivo já existe (cache).
+    → Mostra barra de progresso durante o download.
+    → Trata erros de conexão e timeout.
+
+  _is_valid_zip(path)
+    → Verifica se o arquivo baixado é realmente um ZIP válido.
+    → Evita processar arquivos corrompidos.
+
+  download_cvm_cadastro(force_download)
+    → Baixa o CSV com todas as empresas abertas da CVM.
+    → Salva em: data/raw/cad_cia_aberta.csv
+
+  download_cvm_zip(tipo_doc, ano, force_download)
+    → Baixa o ZIP de ITR ou DFP de um ano específico.
+    → Exemplo: download_cvm_zip("DFP", 2024)
+    → Salva em: data/raw/dfp_cia_aberta_2024.zip
+
+  download_all_cvm_data(start_year, end_year, force_download)
+    → Chama as duas funções acima para todos os anos.
+    → Retorna um dicionário dizendo quais downloads funcionaram.
+
+SISTEMA DE CACHE:
+  Se você rodar o pipeline duas vezes, na segunda vez ele NÃO baixa
+  de novo — usa o arquivo que já está salvo. Para forçar novo download:
+  adicione --force-download no comando.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 4: cvm_parser.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Abre os arquivos ZIP da CVM e lê os CSVs de dentro.
+
+  Cada ZIP da CVM contém vários CSVs, um por demonstrativo:
+    dfp_cia_aberta_DRE_con_2024.csv  → DRE consolidada
+    dfp_cia_aberta_BPA_con_2024.csv  → Balanço Ativo consolidado
+    dfp_cia_aberta_BPP_con_2024.csv  → Balanço Passivo consolidado
+    dfp_cia_aberta_DFC_MI_con_2024.csv → Fluxo de Caixa consolidado
+
+FUNÇÕES PRINCIPAIS:
+
+  list_files_in_zip(zip_path)
+    → Lista todos os arquivos dentro de um ZIP.
+    → Útil para verificar o que tem disponível.
+
+  read_cvm_file_from_zip(zip_path, filename)
+    → Lê um CSV específico de dentro do ZIP, sem extrair para o disco.
+    → Usa sep=";", encoding="latin1" (padrão da CVM).
+    → Preserva CNPJ e CD_CVM como texto (evita que "001" vire "1").
+    → Retorna um DataFrame do pandas.
+
+  get_statement_filename(tipo_doc, statement, ano, consolidated)
+    → Monta o nome esperado do arquivo.
+    → Ex: get_statement_filename("DFP", "DRE", 2024, True)
+          retorna: "dfp_cia_aberta_DRE_con_2024.csv"
+
+  load_statement(tipo_doc, statement, years, consolidated)
+    → Carrega um demonstrativo para vários anos de uma vez.
+    → Se o arquivo consolidado não existir, tenta o individual (fallback).
+    → Junta tudo em um único DataFrame grande.
+    → Exemplo: load_statement("DFP", "DRE", [2020, 2021, 2022, 2023, 2024])
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 5: cvm_cleaner.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Limpa e padroniza os dados brutos da CVM.
+
+  Os dados da CVM vêm "sujos": colunas com espaços, datas como texto,
+  valores com escala diferente (uns em MIL, outros em MILHAO), etc.
+  Este módulo resolve todos esses problemas.
+
+FUNÇÕES PRINCIPAIS:
+
+  normalize_text(text)
+    → Remove espaços duplicados e espaços no início/fim.
+    → Ex: "  PETROBRAS  S.A. " → "PETROBRAS S.A."
+
+  normalize_column_names(df)
+    → Padroniza nomes de colunas: tudo maiúsculo, sem espaços.
+    → Ex: " Dt Refer " → "DT_REFER"
+
+  clean_cadastro(df, only_active)
+    → Limpa o cadastro de empresas.
+    → Converte datas de texto para formato de data real.
+    → Padroniza nomes de empresas.
+    → Opção de filtrar só empresas ativas.
+
+  clean_statement(df)
+    → Limpa um demonstrativo financeiro (DRE, BPA, etc.).
+    → Converte VL_CONTA de texto para número.
+    → Cria VL_CONTA_AJUSTADO:
+        Se ESCALA_MOEDA = "MIL", multiplica por 1.000
+        Se ESCALA_MOEDA = "MILHAO", multiplica por 1.000.000
+        Isso padroniza todos os valores para a mesma unidade.
+    → Cria ANO_REFER (ex: 2024) a partir da data de referência.
+    → Cria TRIMESTRE_REFER (1, 2, 3 ou 4).
+
+POR QUE VL_CONTA_AJUSTADO É IMPORTANTE:
+  A CVM reporta valores em escalas diferentes.
+  Exemplo: uma empresa pode reportar R$ 5.000 com escala MIL,
+  que na verdade significa R$ 5.000.000 (cinco milhões).
+  Sem ajustar a escala, as comparações entre empresas seriam erradas.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 6: company_mapper.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Permite buscar empresas no cadastro e criar o arquivo de tickers.
+
+FUNÇÕES PRINCIPAIS:
+
+  load_company_registry(only_active)
+    → Carrega o cadastro de empresas do arquivo processado.
+    → Tenta primeiro o Parquet (mais rápido); se não existir, lê o CSV.
+
+  filter_company_by_name_or_cvm(query, df)
+    → Busca empresas por nome (parcial), CD_CVM ou CNPJ.
+    → Case-insensitive (não importa maiúsculo/minúsculo).
+    → Ex: filter_company_by_name_or_cvm("PETROBRAS")
+          filter_company_by_name_or_cvm("9512")    ← por CD_CVM
+          filter_company_by_name_or_cvm("33.000.167/0001-01") ← por CNPJ
+
+  create_ticker_mapper_template(df_cadastro)
+    → Cria o arquivo data/processed/ticker_mapper.csv
+    → Com colunas: CD_CVM, CNPJ_CIA, DENOM_CIA, TICKER, SETOR, SUBSETOR
+    → Você preenche a coluna TICKER manualmente depois.
+    → Se o arquivo já existir, preserva os tickers já preenchidos.
+
+  get_cd_cvm_by_query(query)
+    → Retorna apenas o CD_CVM da primeira empresa encontrada.
+
+POR QUE PRECISA DE TICKER MANUAL:
+  A CVM identifica empresas pelo CD_CVM e CNPJ.
+  O ticker (ex: PETR4, VALE3) é um código da B3 (Bolsa),
+  não da CVM. Não existe essa informação nos arquivos da CVM.
+  Por isso o arquivo ticker_mapper.csv precisa ser preenchido
+  manualmente ou via API da B3/brapi.dev.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 7: financial_statements.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Permite extrair informações financeiras específicas de uma empresa.
+
+FUNÇÕES PRINCIPAIS:
+
+  load_processed_statement(statement, tipo_doc)
+    → Carrega um demonstrativo já processado do disco.
+    → Ex: load_processed_statement("DRE", "DFP")
+          carrega: data/processed/dre_dfp.parquet
+
+  extract_account(df, cd_cvm, account_keywords, cd_conta, exact_match)
+    → Busca uma conta específica dentro de um demonstrativo.
+    → Filtra por:
+        cd_cvm: o código da empresa (ex: "9512" para Petrobras)
+        account_keywords: palavras no nome da conta
+        cd_conta: o código contábil exato (ex: "3.01")
+    → Ex: extract_account(dre, cd_cvm="9512",
+                          account_keywords=["receita líquida"])
+    → Retorna todas as linhas que batem com os filtros.
+
+  get_latest_company_statement(cd_cvm, statement, tipo_doc)
+    → Retorna apenas o demonstrativo mais recente da empresa.
+
+  build_company_snapshot(cd_cvm, tipo_doc)
+    → Monta um resumo financeiro completo da empresa.
+    → Tenta extrair automaticamente:
+        DRE: receita líquida, lucro bruto, EBIT, lucro líquido
+        BPA: caixa, aplicações financeiras, ativo total
+        BPP: passivo, patrimônio líquido, dívida bruta
+        DFC: fluxo de caixa operacional, capex
+    → Retorna dicionário com os valores e flags de qualidade.
+    → Flags indicam quais dados foram encontrados e quais estão ausentes.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 8: valuation_metrics.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Calcula métricas fundamentalistas a partir dos dados financeiros.
+
+CONCEITOS DAS MÉTRICAS:
+  Margem Bruta  = Lucro Bruto / Receita Líquida
+  Margem EBIT   = EBIT / Receita Líquida
+  Margem Líquida = Lucro Líquido / Receita Líquida
+  ROE           = Lucro Líquido / Patrimônio Líquido
+                  (quanto a empresa lucra para cada R$ do acionista)
+  ROA           = Lucro Líquido / Ativo Total
+                  (quanto a empresa lucra para cada R$ de ativo)
+  ROIC (aprox)  = EBIT / Capital Investido
+                  (quanto o capital total rende)
+  Dívida Líquida = Dívida Bruta - Caixa
+
+FUNÇÕES PRINCIPAIS:
+
+  safe_divide(a, b)
+    → Divisão segura: retorna None se b = 0 ou se algum valor é inválido.
+    → Evita erro de "divisão por zero" que travaria o programa.
+
+  calculate_net_debt(cash, gross_debt)
+    → Dívida Líquida = Dívida Bruta - Caixa.
+    → Retorna o valor e uma observação explicando se algo está ausente.
+
+  calculate_margins(revenue, gross_profit, ebit, net_income)
+    → Calcula as 3 margens de uma vez.
+    → Se faltar algum dado, retorna NaN para aquela margem.
+
+  calculate_returns(net_income, equity, ebit, invested_capital, total_assets)
+    → Calcula ROE, ROA e ROIC.
+    → Avisa se PL for negativo (ROE ficaria enganoso).
+
+  calculate_basic_metrics(snapshot)
+    → Recebe o snapshot gerado por build_company_snapshot()
+    → Chama todas as funções acima e retorna tudo junto.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 9: valuation_epv.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Calcula o EPV (Earnings Power Value) — valor da empresa baseado
+  no lucro operacional sustentável, sem assumir crescimento futuro.
+
+CONCEITO:
+  EPV é uma metodologia conservadora criada por Bruce Greenwald.
+  A ideia é: qual seria o valor da empresa SE ela não crescer mais?
+  Isso dá um "piso de valor" — se o EPV for maior que o preço de mercado,
+  a empresa pode estar barata mesmo sem crescimento.
+
+  NOPAT = EBIT × (1 - alíquota de imposto)
+        → NOPAT = lucro operacional depois de pagar imposto
+
+  EPV Enterprise = NOPAT / WACC
+        → Divide o lucro pelo custo de capital (como uma perpetuidade)
+
+  EPV Equity = EPV Enterprise - Dívida Líquida
+        → O que sobra para o acionista depois de pagar as dívidas
+
+FUNÇÕES PRINCIPAIS:
+
+  normalize_ebit(ebit_series, method)
+    → Recebe uma lista com os EBITs dos últimos anos.
+    → Normaliza para evitar que um ano excepcional distorça o resultado.
+    → Métodos: mediana (padrão), média, último ano, média 3 anos, média 5 anos.
+    → Mediana é o mais conservador — ignora outliers.
+
+  calculate_epv(ebit_normalized, tax_rate, wacc, net_debt)
+    → Faz o cálculo principal do EPV.
+    → tax_rate padrão: 34% (IRPJ 15% + adicional 10% + CSLL 9% no Brasil)
+    → wacc: você define conforme análise (ex: 0.10 = 10% ao ano)
+    → Retorna dicionário completo com NOPAT, EPV Enterprise, EPV Equity.
+
+  calculate_epv_per_share(equity_value, shares_outstanding)
+    → Divide o EPV Equity pelo número de ações para obter EPV por ação.
+    → Número de ações NÃO está na CVM — deve ser informado manualmente
+      ou obtido via brapi.dev.
+
+  epv_from_ebit_series(ebit_series, tax_rate, wacc, net_debt, norm_method)
+    → Função completa que junta normalização + cálculo em uma chamada.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 10: valuation_dcf.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  Calcula o DCF (Discounted Cash Flow — Fluxo de Caixa Descontado).
+  É o método de valuation mais comum em finanças corporativas.
+
+CONCEITO:
+  A ideia é: o valor de um ativo é igual à soma de todos os fluxos
+  de caixa que ele vai gerar no futuro, trazidos a valor de hoje.
+
+  Um real daqui a 10 anos vale menos que um real hoje.
+  A taxa que faz essa conversão é o WACC.
+
+  ETAPAS:
+  1. Projetar FCL (Fluxo de Caixa Livre) para os próximos N anos
+  2. Calcular o Valor Terminal (o que a empresa vale após o período de projeção)
+  3. Descontar tudo a valor presente usando o WACC
+  4. Somar tudo = Enterprise Value
+  5. Subtrair a Dívida Líquida = Equity Value (valor para o acionista)
+
+FUNÇÕES PRINCIPAIS:
+
+  project_fcf(base_fcf, growth_rates, years)
+    → Projeta o FCL crescendo às taxas informadas.
+    → Ex: project_fcf(1000, [0.10, 0.08, 0.06, 0.05, 0.05], years=5)
+          Ano 1: 1000 × 1.10 = 1100
+          Ano 2: 1100 × 1.08 = 1188
+          Ano 3: 1188 × 1.06 = 1259...
+
+  calculate_terminal_value(final_fcf, terminal_growth, wacc)
+    → Usa o Modelo de Gordon (Gordon Growth Model):
+      TV = FCF_último_ano × (1 + g) / (WACC - g)
+    → g = taxa de crescimento na perpetuidade (geralmente 3-5%)
+    → OBRIGATÓRIO: WACC > g. Se não, a fórmula explode (divisão por zero).
+    → Avisa erro se WACC <= g.
+
+  discount_cash_flows(fcfs, wacc)
+    → Traz cada fluxo a valor presente:
+      VP do Ano 1 = FCF1 / (1 + WACC)^1
+      VP do Ano 2 = FCF2 / (1 + WACC)^2
+      ...
+
+  calculate_dcf(base_fcf, growth_rates, terminal_growth, wacc, net_debt, years)
+    → Função principal que executa todo o DCF de uma vez.
+    → Retorna: fluxos projetados, VP de cada fluxo, valor terminal,
+               enterprise value, equity value e flags de qualidade.
+    → Flag especial: avisa se mais de 75% do valor vem do Valor Terminal
+      (isso significa que o resultado é muito sensível às premissas).
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 11: main.py
+────────────────────────────────────────────────────────────────────────────────
+
+O QUE FAZ:
+  É o ponto de entrada do projeto. É o arquivo que você roda no terminal.
+  Orquestra todos os outros módulos na sequência correta.
+
+PARÂMETROS DE LINHA DE COMANDO:
+  --start-year     Ano inicial (padrão: 2019)
+  --end-year       Ano final (padrão: 2025)
+  --force-download Baixa tudo de novo, ignorando o cache
+  --company-query  Busca uma empresa pelo nome, CD_CVM ou CNPJ
+  --example        Roda um exemplo de EPV e DCF com dados fictícios
+  --skip-download  Pula o download (usa arquivos que já existem)
+
+SEQUÊNCIA DE EXECUÇÃO:
+  1. Cria as pastas data/raw, data/processed, data/cache se não existirem
+  2. Baixa o cadastro da CVM (cad_cia_aberta.csv)
+  3. Para cada ano de start_year a end_year:
+       Baixa o ZIP do ITR daquele ano
+       Baixa o ZIP do DFP daquele ano
+  4. Processa o cadastro: lê, limpa, salva em Parquet e CSV
+  5. Para cada tipo (ITR, DFP) e cada demonstrativo (DRE, BPA, BPP, DFC):
+       Lê os CSVs de dentro dos ZIPs
+       Limpa e normaliza os dados
+       Salva em Parquet e CSV
+  6. Cria o arquivo ticker_mapper.csv
+  7. Imprime resumo de quantos registros foram processados
+  8. Se --company-query foi passado:
+       Busca a empresa
+       Monta snapshot financeiro
+       Imprime na tela
+
+================================================================================
+PARTE 4 — TODO O CÓDIGO PYTHON
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/__init__.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+valuation_cvm - Pipeline de dados fundamentalistas da CVM para valuation de empresas brasileiras.
+"""
+
+__version__ = "0.1.0"
+__author__ = "valuation_cvm"
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/config.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Configurações centrais do projeto: caminhos, URLs da CVM e constantes.
+"""
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Diretórios base
+# ---------------------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+RAW_DIR = DATA_DIR / "raw"
+PROCESSED_DIR = DATA_DIR / "processed"
+CACHE_DIR = DATA_DIR / "cache"
+
+
+def create_directories() -> None:
+    """Cria todos os diretórios necessários caso não existam."""
+    for directory in [RAW_DIR, PROCESSED_DIR, CACHE_DIR]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# URLs da CVM Dados Abertos
+# ---------------------------------------------------------------------------
+
+CVM_BASE_URL = "https://dados.cvm.gov.br/dados/CIA_ABERTA"
+
+CVM_CADASTRO_URL = f"{CVM_BASE_URL}/CAD/DADOS/cad_cia_aberta.csv"
+
+CVM_ZIP_URL_TEMPLATES = {
+    "ITR": f"{CVM_BASE_URL}/DOC/ITR/DADOS/itr_cia_aberta_{{ano}}.zip",
+    "DFP": f"{CVM_BASE_URL}/DOC/DFP/DADOS/dfp_cia_aberta_{{ano}}.zip",
+}
+
+# ---------------------------------------------------------------------------
+# Tipos de documentos e demonstrativos aceitos
+# ---------------------------------------------------------------------------
+
+TIPOS_DOC = ["ITR", "DFP"]
+
+DEMONSTRATIVOS = ["DRE", "BPA", "BPP", "DFC_MI"]
+
+# ---------------------------------------------------------------------------
+# Colunas preservadas / de interesse dos arquivos CVM
+# ---------------------------------------------------------------------------
+
+COLUNAS_INTERESSE = [
+    "CNPJ_CIA",
+    "CD_CVM",
+    "DENOM_CIA",
+    "DT_REFER",
+    "DT_INI_EXERC",
+    "DT_FIM_EXERC",
+    "CD_CONTA",
+    "DS_CONTA",
+    "VL_CONTA",
+    "ESCALA_MOEDA",
+    "ORDEM_EXERC",
+    "VERSAO",
+    "GRUPO_DFP",
+    "MOEDA",
+    "ST_CONTA_FIXA",
+]
+
+# Colunas que devem ser lidas como texto (evitar coerção numérica)
+COLUNAS_TEXTO = ["CNPJ_CIA", "CD_CVM", "CD_CONTA"]
+
+# ---------------------------------------------------------------------------
+# Parâmetros de leitura dos CSVs da CVM
+# ---------------------------------------------------------------------------
+
+CSV_SEP = ";"
+CSV_ENCODING = "latin1"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def get_zip_url(tipo_doc: str, ano: int) -> str:
+    """Monta a URL do ZIP para o tipo de documento e ano informados."""
+    tipo_doc = tipo_doc.upper()
+    if tipo_doc not in CVM_ZIP_URL_TEMPLATES:
+        raise ValueError(f"tipo_doc inválido: '{tipo_doc}'. Use um de {TIPOS_DOC}.")
+    return CVM_ZIP_URL_TEMPLATES[tipo_doc].format(ano=ano)
+
+
+def get_zip_filename(tipo_doc: str, ano: int) -> str:
+    """Retorna o nome do arquivo ZIP local."""
+    tipo_doc = tipo_doc.lower()
+    return f"{tipo_doc}_cia_aberta_{ano}.zip"
+
+
+def get_zip_path(tipo_doc: str, ano: int) -> Path:
+    """Retorna o caminho completo do ZIP local."""
+    return RAW_DIR / get_zip_filename(tipo_doc, ano)
+
+
+def get_processed_path(statement: str, tipo_doc: str, ext: str = "parquet") -> Path:
+    """Retorna o caminho do arquivo processado."""
+    statement = statement.lower()
+    tipo_doc = tipo_doc.lower()
+    return PROCESSED_DIR / f"{statement}_{tipo_doc}.{ext}"
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/logger.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Configuração de logging centralizada para o projeto valuation_cvm.
+"""
+
+import logging
+import sys
+from pathlib import Path
+
+
+def setup_logger(name: str = "valuation_cvm", level: int = logging.INFO) -> logging.Logger:
+    """
+    Cria e configura um logger com saída formatada para stdout.
+    Retorna o logger configurado.
+    """
+    logger = logging.getLogger(name)
+
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(level)
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(level)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    return logger
+
+
+# Logger padrão do projeto
+logger = setup_logger()
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/cvm_downloader.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo responsável por baixar os arquivos da CVM Dados Abertos.
+
+Fontes:
+- Cadastro: https://dados.cvm.gov.br/dados/CIA_ABERTA/CAD/DADOS/cad_cia_aberta.csv
+- ITR/DFP:  https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/{tipo}/DADOS/{tipo_lower}_cia_aberta_{ano}.zip
+"""
+
+import zipfile
+import io
+import time
+from pathlib import Path
+from typing import Optional
+
+import requests
+from tqdm import tqdm
+
+from .config import (
+    CVM_CADASTRO_URL,
+    RAW_DIR,
+    get_zip_url,
+    get_zip_path,
+    create_directories,
+)
+from .logger import logger
+
+# Timeout padrão para requisições (segundos)
+REQUEST_TIMEOUT = 120
+# Tamanho do chunk de download (bytes)
+CHUNK_SIZE = 1024 * 1024  # 1 MB
+
+
+def _download_file(url: str, dest_path: Path, force_download: bool = False) -> bool:
+    """
+    Baixa um arquivo da URL para dest_path.
+    Usa cache: se o arquivo já existir e force_download=False, pula o download.
+    """
+    if dest_path.exists() and not force_download:
+        logger.info("Cache encontrado, pulando download: %s", dest_path.name)
+        return True
+
+    logger.info("Iniciando download: %s -> %s", url, dest_path.name)
+
+    try:
+        response = requests.get(url, stream=True, timeout=REQUEST_TIMEOUT)
+    except requests.exceptions.ConnectionError as exc:
+        logger.error("Erro de conexão ao baixar %s: %s", url, exc)
+        return False
+    except requests.exceptions.Timeout:
+        logger.error("Timeout ao baixar %s", url)
+        return False
+
+    if response.status_code == 404:
+        logger.warning("Arquivo não encontrado (404): %s", url)
+        return False
+
+    if response.status_code != 200:
+        logger.error("HTTP %s ao baixar %s", response.status_code, url)
+        return False
+
+    total_size = int(response.headers.get("content-length", 0))
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(dest_path, "wb") as f:
+        with tqdm(
+            total=total_size,
+            unit="B",
+            unit_scale=True,
+            desc=dest_path.name,
+            disable=total_size == 0,
+            leave=False,
+        ) as pbar:
+            for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+
+    logger.info("Download concluído: %s (%.1f KB)", dest_path.name, dest_path.stat().st_size / 1024)
+    return True
+
+
+def _is_valid_zip(path: Path) -> bool:
+    """Valida se o arquivo em path é um ZIP válido."""
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            bad = zf.testzip()
+            if bad is not None:
+                logger.warning("ZIP corrompido em '%s': primeiro arquivo ruim = %s", path.name, bad)
+                return False
+        return True
+    except zipfile.BadZipFile:
+        logger.warning("Arquivo não é um ZIP válido: %s", path.name)
+        return False
+    except Exception as exc:
+        logger.error("Erro ao validar ZIP %s: %s", path.name, exc)
+        return False
+
+
+def download_cvm_cadastro(force_download: bool = False) -> Optional[Path]:
+    """Baixa o cadastro de companhias abertas da CVM."""
+    create_directories()
+    dest = RAW_DIR / "cad_cia_aberta.csv"
+    success = _download_file(CVM_CADASTRO_URL, dest, force_download=force_download)
+    if not success:
+        return None
+    return dest
+
+
+def download_cvm_zip(tipo_doc: str, ano: int, force_download: bool = False) -> Optional[Path]:
+    """Baixa o ZIP de ITR ou DFP para o ano informado."""
+    create_directories()
+    tipo_doc = tipo_doc.upper()
+    url = get_zip_url(tipo_doc, ano)
+    dest = get_zip_path(tipo_doc, ano)
+
+    success = _download_file(url, dest, force_download=force_download)
+    if not success:
+        return None
+
+    if not _is_valid_zip(dest):
+        logger.warning("ZIP inválido removido: %s", dest.name)
+        dest.unlink(missing_ok=True)
+        return None
+
+    return dest
+
+
+def download_all_cvm_data(start_year: int, end_year: int, force_download: bool = False) -> dict:
+    """Baixa cadastro, ITR e DFP para todos os anos no intervalo."""
+    create_directories()
+    results: dict = {"cadastro": None, "ITR": {}, "DFP": {}}
+
+    logger.info("=== Iniciando download dos dados CVM (%d a %d) ===", start_year, end_year)
+
+    results["cadastro"] = download_cvm_cadastro(force_download=force_download)
+
+    for ano in range(start_year, end_year + 1):
+        for tipo_doc in ["ITR", "DFP"]:
+            path = download_cvm_zip(tipo_doc, ano, force_download=force_download)
+            results[tipo_doc][ano] = path
+            if path is None:
+                logger.warning("[%s %d] Não disponível ou erro no download — será ignorado.", tipo_doc, ano)
+
+    itr_ok = sum(1 for v in results["ITR"].values() if v is not None)
+    dfp_ok = sum(1 for v in results["DFP"].values() if v is not None)
+    logger.info(
+        "=== Download concluído | Cadastro: %s | ITR: %d/%d | DFP: %d/%d ===",
+        "OK" if results["cadastro"] else "FALHOU",
+        itr_ok, end_year - start_year + 1,
+        dfp_ok, end_year - start_year + 1,
+    )
+
+    return results
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/cvm_parser.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo responsável por abrir ZIPs da CVM e ler os CSVs internos.
+"""
+
+import zipfile
+import io
+from pathlib import Path
+from typing import List, Optional
+
+import pandas as pd
+
+from .config import CSV_SEP, CSV_ENCODING, COLUNAS_TEXTO, RAW_DIR, get_zip_path
+from .logger import logger
+
+
+def list_files_in_zip(zip_path: Path) -> List[str]:
+    """Retorna a lista de nomes de arquivos dentro do ZIP."""
+    if not zip_path.exists():
+        logger.warning("ZIP não encontrado: %s", zip_path)
+        return []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            return zf.namelist()
+    except zipfile.BadZipFile:
+        logger.error("ZIP inválido: %s", zip_path)
+        return []
+
+
+def read_cvm_file_from_zip(zip_path: Path, filename: str) -> Optional[pd.DataFrame]:
+    """Lê um CSV específico de dentro do ZIP da CVM."""
+    if not zip_path.exists():
+        logger.warning("ZIP não encontrado: %s", zip_path)
+        return None
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            files_in_zip = zf.namelist()
+            if filename not in files_in_zip:
+                logger.debug("Arquivo '%s' não encontrado em %s", filename, zip_path.name)
+                return None
+
+            with zf.open(filename) as f:
+                raw_bytes = f.read()
+
+        df = pd.read_csv(
+            io.BytesIO(raw_bytes),
+            sep=CSV_SEP,
+            encoding=CSV_ENCODING,
+            dtype={col: str for col in COLUNAS_TEXTO},
+            low_memory=False,
+        )
+        logger.debug("Lido '%s': %d linhas, %d colunas", filename, len(df), df.shape[1])
+        return df
+
+    except Exception as exc:
+        logger.error("Erro ao ler '%s' de %s: %s", filename, zip_path.name, exc)
+        return None
+
+
+def get_statement_filename(tipo_doc: str, statement: str, ano: int, consolidated: bool = True) -> str:
+    """Retorna o nome esperado do arquivo CSV dentro do ZIP."""
+    tipo_doc = tipo_doc.lower()
+    suffix = "con" if consolidated else "ind"
+    return f"{tipo_doc}_cia_aberta_{statement}_{suffix}_{ano}.csv"
+
+
+def _load_single_year(tipo_doc: str, statement: str, ano: int, consolidated: bool) -> Optional[pd.DataFrame]:
+    """Carrega um demonstrativo de um único ano com fallback para individual."""
+    zip_path = get_zip_path(tipo_doc, ano)
+    if not zip_path.exists():
+        logger.debug("[%s %d] ZIP não encontrado, pulando.", tipo_doc, ano)
+        return None
+
+    filename = get_statement_filename(tipo_doc, statement, ano, consolidated)
+    df = read_cvm_file_from_zip(zip_path, filename)
+
+    if df is None and consolidated:
+        filename_ind = get_statement_filename(tipo_doc, statement, ano, consolidated=False)
+        logger.debug("[%s %d] '%s' não encontrado, tentando fallback individual: %s",
+                     tipo_doc, ano, filename, filename_ind)
+        df = read_cvm_file_from_zip(zip_path, filename_ind)
+        if df is not None:
+            df["_FALLBACK_IND"] = True
+
+    if df is not None:
+        df["_FALLBACK_IND"] = df.get("_FALLBACK_IND", False)
+
+    return df
+
+
+def load_statement(tipo_doc: str, statement: str, years: List[int], consolidated: bool = True) -> pd.DataFrame:
+    """Carrega uma demonstração financeira para múltiplos anos."""
+    tipo_doc = tipo_doc.upper()
+    statement = statement.upper()
+    frames: List[pd.DataFrame] = []
+
+    for ano in years:
+        df = _load_single_year(tipo_doc, statement, ano, consolidated)
+        if df is None:
+            logger.warning("[%s %s %d] Nenhum dado carregado.", tipo_doc, statement, ano)
+            continue
+
+        df["TIPO_DOC"] = tipo_doc
+        df["STATEMENT"] = statement
+        df["ANO_ARQUIVO"] = ano
+        df["CONSOLIDADO"] = not df.get("_FALLBACK_IND", pd.Series(False)).any()
+        frames.append(df)
+
+    if not frames:
+        logger.warning("Nenhum dado encontrado para %s %s nos anos: %s", tipo_doc, statement, years)
+        return pd.DataFrame()
+
+    result = pd.concat(frames, ignore_index=True)
+    result.drop(columns=["_FALLBACK_IND"], errors="ignore", inplace=True)
+
+    logger.info("[%s %s] Carregados %d registros de %d ano(s).", tipo_doc, statement, len(result), len(frames))
+    return result
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/cvm_cleaner.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo de limpeza e padronização dos dados da CVM.
+"""
+
+import re
+import unicodedata
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+
+from .logger import logger
+
+
+def normalize_text(text: object) -> str:
+    """Normaliza texto: remove espaços duplicados e strip."""
+    if pd.isna(text):
+        return ""
+    s = str(text).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza nomes de colunas: upper + strip + sem espaços."""
+    df.columns = [normalize_text(c).upper().replace(" ", "_") for c in df.columns]
+    return df
+
+
+def _safe_to_datetime(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors="coerce", dayfirst=False)
+
+
+def _safe_to_numeric(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors="coerce")
+
+
+def clean_cadastro(df: pd.DataFrame, only_active: bool = False) -> pd.DataFrame:
+    """Limpa e padroniza o cadastro de companhias abertas da CVM."""
+    if df is None or df.empty:
+        logger.warning("clean_cadastro: DataFrame vazio ou None recebido.")
+        return pd.DataFrame()
+
+    df = df.copy()
+    df = normalize_column_names(df)
+
+    for col in ["CD_CVM", "CNPJ_CIA", "CNPJ_CVM"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.zfill(
+                14 if "CNPJ" in col else 0
+            ).str.lstrip("0") if "CNPJ" not in col else df[col].astype(str).str.strip()
+            if col == "CD_CVM":
+                df[col] = df[col].astype(str).str.strip()
+
+    date_cols = [c for c in df.columns if c.startswith("DT_")]
+    for col in date_cols:
+        df[col] = _safe_to_datetime(df[col])
+
+    for col in ["DENOM_CIA", "DENOM_SOCIAL", "SIT", "SETOR_ATIV"]:
+        if col in df.columns:
+            df[col] = df[col].apply(normalize_text)
+
+    if only_active and "SIT" in df.columns:
+        antes = len(df)
+        df = df[df["SIT"].str.upper().str.contains("ATIVO|ATIVA", na=False)].copy()
+        logger.info("Filtro only_active: %d -> %d empresas.", antes, len(df))
+
+    logger.info("Cadastro limpo: %d empresas, %d colunas.", len(df), df.shape[1])
+    return df.reset_index(drop=True)
+
+
+_ESCALA_MAP = {
+    "UNIDADE": 1,
+    "MIL": 1_000,
+    "MILHAR": 1_000,
+    "MILHAO": 1_000_000,
+    "MILHÃO": 1_000_000,
+    "BILHAO": 1_000_000_000,
+    "BILHÃO": 1_000_000_000,
+}
+
+
+def _resolve_scale(escala: object) -> float:
+    """Retorna o multiplicador para a escala monetária fornecida."""
+    if pd.isna(escala):
+        return np.nan
+    key = normalize_text(str(escala)).upper()
+    key_norm = "".join(
+        c for c in unicodedata.normalize("NFD", key)
+        if unicodedata.category(c) != "Mn"
+    )
+    return float(_ESCALA_MAP.get(key_norm, np.nan))
+
+
+def clean_statement(df: pd.DataFrame) -> pd.DataFrame:
+    """Limpa e padroniza um demonstrativo financeiro da CVM."""
+    if df is None or df.empty:
+        logger.warning("clean_statement: DataFrame vazio ou None recebido.")
+        return pd.DataFrame()
+
+    df = df.copy()
+    df = normalize_column_names(df)
+
+    for col in ["CNPJ_CIA", "CD_CVM", "CD_CONTA"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    for col in ["DT_REFER", "DT_INI_EXERC", "DT_FIM_EXERC"]:
+        if col in df.columns:
+            df[col] = _safe_to_datetime(df[col])
+
+    if "VL_CONTA" in df.columns:
+        df["VL_CONTA"] = _safe_to_numeric(df["VL_CONTA"])
+
+    if "ESCALA_MOEDA" in df.columns:
+        df["_ESCALA_MULT"] = df["ESCALA_MOEDA"].apply(_resolve_scale)
+        if "VL_CONTA" in df.columns:
+            df["VL_CONTA_AJUSTADO"] = df["VL_CONTA"] * df["_ESCALA_MULT"]
+        df.drop(columns=["_ESCALA_MULT"], inplace=True)
+    else:
+        if "VL_CONTA" in df.columns:
+            df["VL_CONTA_AJUSTADO"] = df["VL_CONTA"]
+
+    ref_col = "DT_REFER" if "DT_REFER" in df.columns else (
+        "DT_FIM_EXERC" if "DT_FIM_EXERC" in df.columns else None
+    )
+    if ref_col:
+        df["ANO_REFER"] = df[ref_col].dt.year
+
+    if "DT_REFER" in df.columns:
+        df["TRIMESTRE_REFER"] = df["DT_REFER"].dt.quarter
+
+    if "DS_CONTA" in df.columns:
+        df["DS_CONTA"] = df["DS_CONTA"].apply(normalize_text)
+
+    for col in ["VERSAO", "ORDEM_EXERC"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    logger.debug("clean_statement: %d linhas, %d colunas.", len(df), df.shape[1])
+    return df.reset_index(drop=True)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/company_mapper.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo para mapeamento e busca de empresas.
+"""
+
+import re
+from pathlib import Path
+from typing import Optional, Union
+
+import pandas as pd
+
+from .config import PROCESSED_DIR, RAW_DIR
+from .cvm_cleaner import clean_cadastro, normalize_text
+from .logger import logger
+
+CADASTRO_PARQUET = PROCESSED_DIR / "cadastro_cvm.parquet"
+CADASTRO_CSV = RAW_DIR / "cad_cia_aberta.csv"
+TICKER_MAPPER_PATH = PROCESSED_DIR / "ticker_mapper.csv"
+
+
+def load_company_registry(only_active: bool = False) -> pd.DataFrame:
+    """Carrega o cadastro de empresas abertas da CVM."""
+    if CADASTRO_PARQUET.exists():
+        logger.info("Carregando cadastro de: %s", CADASTRO_PARQUET)
+        df = pd.read_parquet(CADASTRO_PARQUET)
+    elif CADASTRO_CSV.exists():
+        logger.info("Parquet não encontrado. Carregando CSV bruto: %s", CADASTRO_CSV)
+        df = pd.read_csv(CADASTRO_CSV, sep=";", encoding="latin1", dtype=str)
+        df = clean_cadastro(df, only_active=only_active)
+    else:
+        logger.error("Cadastro não encontrado. Execute o pipeline primeiro.")
+        return pd.DataFrame()
+
+    if only_active and "SIT" in df.columns:
+        df = df[df["SIT"].str.upper().str.contains("ATIVO|ATIVA", na=False)].copy()
+
+    return df.reset_index(drop=True)
+
+
+def filter_company_by_name_or_cvm(query: Union[str, int], df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """Busca empresas por nome (parcial), CD_CVM ou CNPJ."""
+    if df is None:
+        df = load_company_registry()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    query_str = normalize_text(str(query)).upper()
+    masks = []
+
+    if "CD_CVM" in df.columns:
+        masks.append(df["CD_CVM"].astype(str).str.strip() == query_str)
+
+    if "CNPJ_CIA" in df.columns:
+        cnpj_clean = re.sub(r"[^\d]", "", query_str) if len(query_str) > 6 else ""
+        if cnpj_clean:
+            masks.append(df["CNPJ_CIA"].astype(str).str.replace(r"[^\d]", "", regex=True) == cnpj_clean)
+
+    for col in ["DENOM_CIA", "DENOM_SOCIAL"]:
+        if col in df.columns:
+            masks.append(
+                df[col].apply(normalize_text).str.upper().str.contains(query_str, na=False, regex=False)
+            )
+
+    if not masks:
+        return pd.DataFrame()
+
+    combined = masks[0]
+    for m in masks[1:]:
+        combined = combined | m
+
+    result = df[combined].copy()
+    logger.info("Busca '%s': %d empresa(s) encontrada(s).", query, len(result))
+    return result.reset_index(drop=True)
+
+
+def create_ticker_mapper_template(df_cadastro: Optional[pd.DataFrame] = None) -> Path:
+    """Cria (ou atualiza) o arquivo ticker_mapper.csv."""
+    if df_cadastro is None:
+        df_cadastro = load_company_registry()
+
+    cols_needed = ["CD_CVM", "CNPJ_CIA", "DENOM_CIA"]
+    available = [c for c in cols_needed if c in df_cadastro.columns]
+
+    if not available:
+        logger.error("Cadastro sem colunas esperadas: %s", cols_needed)
+        return TICKER_MAPPER_PATH
+
+    template_df = df_cadastro[available].copy().drop_duplicates(subset=["CD_CVM"])
+
+    for col in ["TICKER", "SETOR", "SUBSETOR", "FONTE_TICKER"]:
+        if col not in template_df.columns:
+            template_df[col] = ""
+
+    if TICKER_MAPPER_PATH.exists():
+        existing = pd.read_csv(TICKER_MAPPER_PATH, dtype=str)
+        filled = existing[existing["TICKER"].notna() & (existing["TICKER"] != "")]
+        if not filled.empty:
+            template_df = template_df.merge(
+                filled[["CD_CVM", "TICKER", "SETOR", "SUBSETOR", "FONTE_TICKER"]],
+                on="CD_CVM", how="left", suffixes=("", "_filled"),
+            )
+            for col in ["TICKER", "SETOR", "SUBSETOR", "FONTE_TICKER"]:
+                filled_col = col + "_filled"
+                if filled_col in template_df.columns:
+                    template_df[col] = template_df[filled_col].where(
+                        template_df[filled_col].notna(), template_df[col]
+                    )
+                    template_df.drop(columns=[filled_col], inplace=True)
+
+    TICKER_MAPPER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    template_df.to_csv(TICKER_MAPPER_PATH, index=False)
+    logger.info("ticker_mapper.csv criado/atualizado: %d empresas.", len(template_df))
+    return TICKER_MAPPER_PATH
+
+
+def get_cd_cvm_by_query(query: str) -> Optional[str]:
+    """Retorna o CD_CVM da primeira empresa encontrada."""
+    result = filter_company_by_name_or_cvm(query)
+    if result.empty:
+        return None
+    if "CD_CVM" in result.columns:
+        return str(result.iloc[0]["CD_CVM"])
+    return None
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/financial_statements.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo para carregar, filtrar e construir snapshots financeiros de empresas.
+"""
+
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from .config import PROCESSED_DIR, get_processed_path
+from .logger import logger
+
+
+def load_processed_statement(statement: str, tipo_doc: str) -> pd.DataFrame:
+    """Carrega o parquet processado de um demonstrativo."""
+    parquet_path = get_processed_path(statement.lower(), tipo_doc.lower(), "parquet")
+    if not parquet_path.exists():
+        logger.warning("Arquivo processado não encontrado: %s.", parquet_path)
+        return pd.DataFrame()
+    df = pd.read_parquet(parquet_path)
+    logger.info("Carregado %s: %d registros.", parquet_path.name, len(df))
+    return df
+
+
+def extract_account(
+    df: pd.DataFrame,
+    cd_cvm: Optional[str] = None,
+    account_keywords: Optional[List[str]] = None,
+    cd_conta: Optional[str] = None,
+    exact_match: bool = False,
+) -> pd.DataFrame:
+    """Busca contas em um demonstrativo filtradas por empresa, palavras-chave ou código."""
+    if df.empty:
+        return pd.DataFrame()
+
+    mask = pd.Series([True] * len(df), index=df.index)
+
+    if cd_cvm is not None and "CD_CVM" in df.columns:
+        mask &= df["CD_CVM"].astype(str).str.strip() == str(cd_cvm).strip()
+
+    if cd_conta is not None and "CD_CONTA" in df.columns:
+        mask &= df["CD_CONTA"].astype(str).str.strip() == str(cd_conta).strip()
+
+    if account_keywords and "DS_CONTA" in df.columns:
+        ds_upper = df["DS_CONTA"].fillna("").str.upper()
+        if exact_match:
+            kw_mask = pd.Series([True] * len(df), index=df.index)
+            for kw in account_keywords:
+                kw_mask &= ds_upper.str.contains(kw.upper(), regex=False, na=False)
+        else:
+            kw_mask = pd.Series([False] * len(df), index=df.index)
+            for kw in account_keywords:
+                kw_mask |= ds_upper.str.contains(kw.upper(), regex=False, na=False)
+        mask &= kw_mask
+
+    return df[mask].copy().reset_index(drop=True)
+
+
+def get_latest_company_statement(cd_cvm: str, statement: str, tipo_doc: str = "DFP") -> pd.DataFrame:
+    """Retorna o demonstrativo mais recente da empresa."""
+    df = load_processed_statement(statement, tipo_doc)
+    if df.empty:
+        return pd.DataFrame()
+
+    company_df = df[df["CD_CVM"].astype(str).str.strip() == str(cd_cvm).strip()].copy()
+    if company_df.empty:
+        logger.warning("Empresa CD_CVM='%s' não encontrada em %s %s.", cd_cvm, tipo_doc, statement)
+        return pd.DataFrame()
+
+    date_col = "DT_REFER" if "DT_REFER" in company_df.columns else "DT_FIM_EXERC"
+    if date_col in company_df.columns:
+        last_date = company_df[date_col].max()
+        company_df = company_df[company_df[date_col] == last_date].copy()
+
+    return company_df.reset_index(drop=True)
+
+
+def _get_value(
+    df: pd.DataFrame, cd_cvm: str, keywords: List[str],
+    date_col: str = "DT_REFER", value_col: str = "VL_CONTA_AJUSTADO",
+) -> Optional[float]:
+    """Extrai o valor de uma conta para a data mais recente."""
+    sub = extract_account(df, cd_cvm=cd_cvm, account_keywords=keywords)
+    if sub.empty or value_col not in sub.columns:
+        return None
+
+    if date_col in sub.columns:
+        last_date = sub[date_col].max()
+        sub = sub[sub[date_col] == last_date]
+
+    vals = sub[value_col].dropna()
+    if vals.empty:
+        return None
+
+    if "CD_CONTA" in sub.columns:
+        sub_sorted = sub.assign(_lvl=sub["CD_CONTA"].astype(str).str.count(r"\.")).sort_values("_lvl")
+        first_val = sub_sorted.iloc[0][value_col]
+        if pd.notna(first_val):
+            return float(first_val)
+
+    return float(vals.iloc[0])
+
+
+def build_company_snapshot(cd_cvm: str, tipo_doc: str = "DFP") -> Dict:
+    """Constrói um resumo financeiro consolidado da empresa."""
+    cd_cvm = str(cd_cvm).strip()
+
+    dre = load_processed_statement("DRE", tipo_doc)
+    bpa = load_processed_statement("BPA", tipo_doc)
+    bpp = load_processed_statement("BPP", tipo_doc)
+    dfc = load_processed_statement("DFC_MI", tipo_doc)
+
+    def get(df, keys):
+        if df.empty:
+            return None
+        return _get_value(df, cd_cvm, keys)
+
+    receita = get(dre, ["receita líquida", "receita de venda", "receita operacional líquida"])
+    lucro_bruto = get(dre, ["lucro bruto"])
+    ebit = get(dre, ["resultado operacional", "ebit", "lucro operacional"])
+    lucro_liq = get(dre, ["lucro líquido", "resultado líquido do período"])
+    caixa = get(bpa, ["caixa e equivalentes", "disponibilidades", "caixa"])
+    aplicacoes = get(bpa, ["aplicações financeiras", "títulos e valores", "investimentos financeiros"])
+    ativo_total = get(bpa, ["ativo total"])
+    passivo_total = get(bpp, ["passivo total"])
+    pl = get(bpp, ["patrimônio líquido", "total do patrimônio líquido"])
+    divida_cp = get(bpp, ["empréstimos e financiamentos", "debentures", "dívida", "debêntures"])
+    divida_lp = get(bpp, ["empréstimos e financiamentos de longo prazo"])
+    fcop = get(dfc, ["caixa gerado", "caixa líquido nas atividades operacionais",
+                      "fluxo de caixa das atividades operacionais"])
+    capex = get(dfc, ["aquisição de imobilizado", "capex", "investimentos em ativo imobilizado"])
+
+    divida_bruta = None
+    if divida_cp is not None or divida_lp is not None:
+        divida_bruta = (divida_cp or 0.0) + (divida_lp or 0.0)
+
+    caixa_total = (caixa or 0.0) + (aplicacoes or 0.0)
+    divida_liq = divida_bruta - caixa_total if divida_bruta is not None else None
+
+    snapshot = {
+        "receita_liquida": receita, "lucro_bruto": lucro_bruto, "ebit": ebit,
+        "lucro_liquido": lucro_liq, "caixa_equivalentes": caixa,
+        "aplicacoes_financeiras": aplicacoes, "ativo_total": ativo_total,
+        "passivo_total": passivo_total, "patrimonio_liquido": pl,
+        "divida_bruta": divida_bruta, "divida_liquida": divida_liq,
+        "fluxo_caixa_operacional": fcop, "capex": capex,
+        "has_revenue": receita is not None, "has_gross_profit": lucro_bruto is not None,
+        "has_ebit": ebit is not None, "has_net_income": lucro_liq is not None,
+        "has_cash": caixa is not None, "has_debt": divida_bruta is not None,
+        "has_equity": pl is not None, "has_operating_cash_flow": fcop is not None,
+        "has_capex": capex is not None, "cd_cvm": cd_cvm, "tipo_doc": tipo_doc,
+    }
+
+    missing = [k.replace("has_", "") for k, v in snapshot.items() if k.startswith("has_") and not v]
+    if missing:
+        logger.warning("Snapshot CD_CVM=%s: dados ausentes para: %s", cd_cvm, ", ".join(missing))
+    return snapshot
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/valuation_metrics.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo de cálculo de métricas fundamentalistas básicas.
+"""
+
+from typing import Dict, Optional, Tuple
+import math
+import numpy as np
+
+from .logger import logger
+
+
+def safe_divide(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    """Divisão segura: retorna None se b == 0 ou se algum valor é inválido."""
+    if a is None or b is None:
+        return None
+    if isinstance(a, float) and math.isnan(a):
+        return None
+    if isinstance(b, float) and math.isnan(b):
+        return None
+    if b == 0:
+        return None
+    return a / b
+
+
+def _to_float(val: object) -> Optional[float]:
+    """Converte para float, retorna None em caso de falha."""
+    if val is None:
+        return None
+    try:
+        v = float(val)
+        return None if math.isnan(v) else v
+    except (TypeError, ValueError):
+        return None
+
+
+def calculate_net_debt(cash: Optional[float], gross_debt: Optional[float]) -> Tuple[Optional[float], str]:
+    """Calcula dívida líquida = dívida bruta - caixa."""
+    cash = _to_float(cash)
+    gross_debt = _to_float(gross_debt)
+    if gross_debt is None and cash is None:
+        return None, "Dívida bruta e caixa ausentes"
+    if gross_debt is None:
+        return None, "Dívida bruta ausente"
+    if cash is None:
+        return gross_debt, "Caixa ausente: dívida líquida = dívida bruta"
+    return gross_debt - cash, "OK"
+
+
+def calculate_margins(revenue, gross_profit, ebit, net_income) -> Dict[str, Optional[float]]:
+    """Calcula margens brutas, operacional e líquida."""
+    rev = _to_float(revenue)
+    margins = {
+        "margem_bruta": safe_divide(_to_float(gross_profit), rev),
+        "margem_ebit": safe_divide(_to_float(ebit), rev),
+        "margem_liquida": safe_divide(_to_float(net_income), rev),
+    }
+    return {k: (v if v is not None else float("nan")) for k, v in margins.items()}
+
+
+def calculate_returns(net_income, equity, ebit, invested_capital, total_assets=None) -> Dict:
+    """Calcula ROE, ROA e ROIC aproximado."""
+    ni = _to_float(net_income)
+    eq = _to_float(equity)
+    eb = _to_float(ebit)
+    ic = _to_float(invested_capital)
+    ta = _to_float(total_assets)
+    roe = safe_divide(ni, eq)
+    roa = safe_divide(ni, ta)
+    roic_aprox = safe_divide(eb, ic)
+    results = {
+        "roe": roe if roe is not None else float("nan"),
+        "roa": roa if roa is not None else float("nan"),
+        "roic_aprox": roic_aprox if roic_aprox is not None else float("nan"),
+    }
+    if eq is not None and eq < 0:
+        logger.warning("ROE: patrimônio líquido negativo — resultado pode ser enganoso.")
+    return results
+
+
+def calculate_basic_metrics(snapshot: Dict) -> Dict:
+    """Calcula métricas fundamentalistas completas a partir de um snapshot."""
+    receita = _to_float(snapshot.get("receita_liquida"))
+    lucro_bruto = _to_float(snapshot.get("lucro_bruto"))
+    ebit = _to_float(snapshot.get("ebit"))
+    lucro_liq = _to_float(snapshot.get("lucro_liquido"))
+    caixa = _to_float(snapshot.get("caixa_equivalentes"))
+    aplic = _to_float(snapshot.get("aplicacoes_financeiras"))
+    divida_bruta = _to_float(snapshot.get("divida_bruta"))
+    pl = _to_float(snapshot.get("patrimonio_liquido"))
+    ativo = _to_float(snapshot.get("ativo_total"))
+    passivo = _to_float(snapshot.get("passivo_total"))
+    fcop = _to_float(snapshot.get("fluxo_caixa_operacional"))
+    capex = _to_float(snapshot.get("capex"))
+
+    caixa_total = (caixa or 0.0) + (aplic or 0.0) if (caixa is not None or aplic is not None) else None
+    divida_liq, divida_obs = calculate_net_debt(caixa_total, divida_bruta)
+    cap_inv = (pl + divida_bruta) if (pl is not None and divida_bruta is not None) else pl
+    margins = calculate_margins(receita, lucro_bruto, ebit, lucro_liq)
+    returns = calculate_returns(lucro_liq, pl, ebit, cap_inv, ativo)
+    fcl_aprox = (fcop - abs(capex)) if (fcop is not None and capex is not None) else None
+
+    return {
+        "receita_liquida": receita, "lucro_bruto": lucro_bruto, "ebit": ebit,
+        "lucro_liquido": lucro_liq, "caixa_equivalentes": caixa,
+        "aplicacoes_financeiras": aplic, "caixa_total": caixa_total,
+        "divida_bruta": divida_bruta, "divida_liquida": divida_liq,
+        "divida_liquida_obs": divida_obs, "patrimonio_liquido": pl,
+        "ativo_total": ativo, "passivo_total": passivo,
+        "fluxo_caixa_operacional": fcop, "capex": capex, "fcl_aprox": fcl_aprox,
+        "capital_investido_aprox": cap_inv, **margins, **returns,
+        "has_revenue": receita is not None, "has_gross_profit": lucro_bruto is not None,
+        "has_ebit": ebit is not None, "has_net_income": lucro_liq is not None,
+        "has_cash": caixa is not None, "has_debt": divida_bruta is not None,
+        "has_equity": pl is not None, "has_operating_cash_flow": fcop is not None,
+        "has_capex": capex is not None, "has_fcl": fcl_aprox is not None,
+    }
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/valuation_epv.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo de cálculo de EPV (Earnings Power Value).
+Referência: metodologia de Bruce Greenwald.
+"""
+
+import math
+from typing import Dict, List, Literal, Optional
+
+import numpy as np
+
+from .logger import logger
+from .valuation_metrics import safe_divide, _to_float
+
+NormMethod = Literal["median", "mean", "last", "mean_3y", "mean_5y"]
+
+
+def normalize_ebit(ebit_series: List[Optional[float]], method: NormMethod = "median") -> Optional[float]:
+    """Normaliza uma série histórica de EBIT."""
+    cleaned = [_to_float(v) for v in ebit_series if _to_float(v) is not None]
+    if not cleaned:
+        logger.warning("normalize_ebit: nenhum valor válido na série.")
+        return None
+    if method == "last":
+        return cleaned[-1]
+    window = cleaned[-3:] if method == "mean_3y" else (cleaned[-5:] if method == "mean_5y" else cleaned)
+    if not window:
+        return None
+    return float(np.median(window)) if method == "median" else float(np.mean(window))
+
+
+def calculate_epv(ebit_normalized, tax_rate=0.34, wacc=0.10, net_debt=0.0) -> Dict:
+    """Calcula o EPV enterprise e de equity."""
+    result = {
+        "ebit_normalized": None, "nopat": None, "epv_enterprise": None,
+        "net_debt": net_debt, "epv_equity": None,
+        "premissas": {"tax_rate": tax_rate, "wacc": wacc,
+                      "metodo_descricao": "EPV = NOPAT / WACC; NOPAT = EBIT × (1 - tax_rate)"},
+        "flags": [],
+    }
+    if ebit_normalized is None:
+        result["flags"].append("EBIT_NORMALIZADO_AUSENTE")
+        return result
+    ebit_val = _to_float(ebit_normalized)
+    if ebit_val is None:
+        result["flags"].append("EBIT_NORMALIZADO_INVALIDO")
+        return result
+    if wacc <= 0:
+        result["flags"].append("WACC_INVALIDO")
+        return result
+    if ebit_val < 0:
+        result["flags"].append("EBIT_NEGATIVO_EPV_NEGATIVO")
+        logger.warning("calculate_epv: EBIT normalizado é negativo — empresa sem poder de lucro positivo.")
+    nopat = ebit_val * (1 - tax_rate)
+    epv_enterprise = safe_divide(nopat, wacc)
+    epv_equity = (epv_enterprise - net_debt) if epv_enterprise is not None else None
+    result.update({"ebit_normalized": ebit_val, "nopat": nopat,
+                   "epv_enterprise": epv_enterprise, "epv_equity": epv_equity})
+    if not result["flags"]:
+        result["flags"].append("OK")
+    logger.info("EPV calculado | EBIT_norm=%.2f | NOPAT=%.2f | EPV_EV=%.2f | EPV_Equity=%.2f",
+                ebit_val, nopat, epv_enterprise or float("nan"), epv_equity or float("nan"))
+    return result
+
+
+def calculate_epv_per_share(equity_value, shares_outstanding) -> Optional[float]:
+    """Calcula o EPV por ação. shares_outstanding deve ser fornecido externamente."""
+    ev = _to_float(equity_value)
+    shares = _to_float(shares_outstanding)
+    if ev is None:
+        return None
+    if shares is None or shares <= 0:
+        logger.warning("calculate_epv_per_share: número de ações não fornecido.")
+        return None
+    return ev / shares
+
+
+def epv_from_ebit_series(ebit_series, tax_rate=0.34, wacc=0.10, net_debt=0.0,
+                          norm_method="median", shares_outstanding=None) -> Dict:
+    """Fluxo completo: normaliza EBIT histórico e calcula EPV."""
+    ebit_norm = normalize_ebit(ebit_series, method=norm_method)
+    result = calculate_epv(ebit_norm, tax_rate=tax_rate, wacc=wacc, net_debt=net_debt)
+    result["premissas"]["norm_method"] = norm_method
+    result["premissas"]["ebit_series_length"] = len([v for v in ebit_series if v is not None])
+    if shares_outstanding:
+        result["epv_per_share"] = calculate_epv_per_share(result["epv_equity"], shares_outstanding)
+    else:
+        result["epv_per_share"] = None
+        result["flags"].append("SHARES_OUTSTANDING_NAO_FORNECIDO")
+    return result
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/valuation_dcf.py
+────────────────────────────────────────────────────────────────────────────────
+
+"""
+Módulo de cálculo de DCF (Discounted Cash Flow).
+"""
+
+import math
+from typing import Dict, List, Optional
+
+import numpy as np
+
+from .logger import logger
+from .valuation_metrics import safe_divide, _to_float
+
+
+def project_fcf(base_fcf: float, growth_rates: List[float], years: Optional[int] = None) -> List[float]:
+    """Projeta o FCL ao longo dos anos com as taxas de crescimento fornecidas."""
+    if years is None:
+        years = len(growth_rates)
+    if years <= 0:
+        return []
+    if not growth_rates:
+        growth_rates = [0.0]
+    rates = list(growth_rates)
+    while len(rates) < years:
+        rates.append(rates[-1])
+    fcfs = []
+    current = float(base_fcf)
+    for i in range(years):
+        current = current * (1 + rates[i])
+        fcfs.append(current)
+    return fcfs
+
+
+def calculate_terminal_value(final_fcf: float, terminal_growth: float, wacc: float) -> Optional[float]:
+    """Calcula o Valor Terminal pelo Modelo de Gordon: TV = FCF×(1+g)/(WACC-g)"""
+    if wacc <= terminal_growth:
+        logger.error("calculate_terminal_value: WACC (%.4f) <= g (%.4f) — fórmula inválida.", wacc, terminal_growth)
+        return None
+    return final_fcf * (1 + terminal_growth) / (wacc - terminal_growth)
+
+
+def discount_cash_flows(fcfs: List[float], wacc: float) -> List[float]:
+    """Desconta uma lista de fluxos de caixa ao valor presente."""
+    if wacc <= 0:
+        return [float("nan")] * len(fcfs)
+    return [fcf / ((1 + wacc) ** (i + 1)) for i, fcf in enumerate(fcfs)]
+
+
+def calculate_dcf(base_fcf, growth_rates, terminal_growth, wacc, net_debt=0.0, years=None) -> Dict:
+    """Calcula o DCF completo: projeta FCL, desconta, calcula Valor Terminal e Equity Value."""
+    result = {
+        "fcfs_projetados": [], "vp_fcfs": [], "valor_terminal": None,
+        "vp_valor_terminal": None, "enterprise_value": None, "net_debt": net_debt,
+        "equity_value": None,
+        "premissas": {"base_fcf": base_fcf, "growth_rates": growth_rates,
+                      "terminal_growth": terminal_growth, "wacc": wacc,
+                      "years": years or len(growth_rates)},
+        "flags": [],
+    }
+    if wacc <= 0:
+        result["flags"].append("WACC_INVALIDO")
+        return result
+    if wacc <= terminal_growth:
+        result["flags"].append("WACC_MENOR_OU_IGUAL_A_G")
+        logger.error("calculate_dcf: WACC <= g — Valor Terminal inválido.")
+        return result
+    if base_fcf < 0:
+        result["flags"].append("FCL_BASE_NEGATIVO")
+
+    fcfs = project_fcf(base_fcf, growth_rates, years=years)
+    result["fcfs_projetados"] = fcfs
+    result["premissas"]["years"] = len(fcfs)
+
+    if not fcfs:
+        result["flags"].append("PROJECAO_VAZIA")
+        return result
+
+    vp_fcfs = discount_cash_flows(fcfs, wacc)
+    result["vp_fcfs"] = vp_fcfs
+    soma_vp_fcfs = sum(vp_fcfs)
+
+    tv = calculate_terminal_value(fcfs[-1], terminal_growth, wacc)
+    result["valor_terminal"] = tv
+    if tv is None:
+        result["flags"].append("VALOR_TERMINAL_INVALIDO")
+        return result
+
+    n_anos = len(fcfs)
+    vp_tv = tv / ((1 + wacc) ** n_anos)
+    result["vp_valor_terminal"] = vp_tv
+
+    ev = soma_vp_fcfs + vp_tv
+    result["enterprise_value"] = ev
+    result["equity_value"] = ev - net_debt
+
+    if not result["flags"]:
+        result["flags"].append("OK")
+
+    tv_pct = safe_divide(vp_tv, ev)
+    if tv_pct is not None:
+        result["premissas"]["pct_ev_de_valor_terminal"] = round(tv_pct * 100, 1)
+        if tv_pct > 0.75:
+            result["flags"].append("ALTO_PESO_VALOR_TERMINAL_ACIMA_75PCT")
+            logger.warning("DCF: %.1f%% do EV vem do Valor Terminal — alta sensibilidade.", tv_pct * 100)
+
+    logger.info("DCF calculado | EV=%.2f | TV=%.2f (%.1f%%) | Equity=%.2f",
+                ev, vp_tv, (tv_pct or 0) * 100, result["equity_value"])
+    return result
+
+
+────────────────────────────────────────────────────────────────────────────────
+ARQUIVO: src/main.py
+────────────────────────────────────────────────────────────────────────────────
+
+[Conteúdo idêntico ao arquivo main.py completo mostrado anteriormente na Parte 3]
+Ver o arquivo src/main.py no repositório para o código completo.
+
+
+================================================================================
+DICIONÁRIO DE TERMOS TÉCNICOS USADOS NO CÓDIGO
+================================================================================
+
+DataFrame        → Tabela de dados do pandas (como uma planilha Excel em memória)
+Parquet          → Formato de arquivo eficiente para dados tabulares (mais rápido que CSV)
+ZIP              → Arquivo comprimido (como um .rar). A CVM distribui os dados em ZIP.
+CSV              → Arquivo de texto separado por vírgula (ou ponto-e-vírgula no caso da CVM)
+Encoding         → Forma de codificar caracteres especiais (ã, é, ç). A CVM usa "latin1"
+Cache            → Guardar uma cópia para não baixar de novo desnecessariamente
+Type hints       → Indicações de tipo nas funções Python (ex: def soma(a: int, b: int) -> int)
+None/NaN         → "Vazio" ou "Não disponível" em Python/Pandas
+WACC             → Weighted Average Cost of Capital = Custo Médio Ponderado de Capital
+EPV              → Earnings Power Value = valor baseado no lucro recorrente
+DCF              → Discounted Cash Flow = Fluxo de Caixa Descontado
+NOPAT            → Net Operating Profit After Tax = lucro operacional após impostos
+FCL              → Fluxo de Caixa Livre (equivalente ao Free Cash Flow em inglês)
+EBIT             → Earnings Before Interest and Taxes = lucro antes de juros e impostos
+ROE              → Return on Equity = retorno sobre o patrimônio líquido
+ROA              → Return on Assets = retorno sobre ativos
+ROIC             → Return on Invested Capital = retorno sobre capital investido
+DRE              → Demonstração do Resultado do Exercício (conta lucros e perdas)
+BPA              → Balanço Patrimonial Ativo (o que a empresa TEM)
+BPP              → Balanço Patrimonial Passivo (o que a empresa DEVE + PL)
+DFC              → Demonstração do Fluxo de Caixa (entradas e saídas de dinheiro)
+ITR              → Informação Trimestral (relatório a cada 3 meses)
+DFP              → Demonstração Financeira Padronizada (relatório anual)
+CD_CVM           → Código CVM da empresa (identificador único na CVM)
+CNPJ_CIA         → CNPJ da empresa (como um CPF, mas para empresas)
+DS_CONTA         → Descrição da conta (o nome da linha no demonstrativo)
+CD_CONTA         → Código da conta (ex: "3.01" para receita de vendas)
+VL_CONTA         → Valor da conta (o número em si)
+ESCALA_MOEDA     → Se o valor está em Reais, Mil Reais ou Milhões
+VL_CONTA_AJUSTADO → VL_CONTA multiplicado pelo fator de ESCALA_MOEDA
+
+================================================================================
+FIM DO ARQUIVO
+================================================================================
+
+Gerado em: 2026-06-08
+Repositório: https://github.com/gjunqueira21-afk/EPS-VALUE-DASHBOARD-
+Branch: claude/cvm-financial-data-pipeline-iqaRG

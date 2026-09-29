@@ -1,0 +1,79 @@
+{
+  "sobre": [
+    "Conjunto dourado de ABSTENÇÃO: perguntas cuja resposta correta é 'não tenho",
+    "esse dado'. É o teste mais importante da mesa, porque o modo de falha de um",
+    "painel de IA não é errar a conta — é responder com confiança sobre o que não",
+    "sabe. O parecer 03 §6 pede que este teste seja bloqueante.",
+    "",
+    "Rodar: python finlab/tests/eval_abstencao.py --provider openrouter --model X",
+    "Precisa de chave real, então não roda na suíte offline.",
+    "",
+    "'deve_conter': ao menos um destes precisa aparecer (abstenção reconhecida).",
+    "'nao_pode_conter': se aparecer, o caso falha — é invenção com cara de fato."
+  ],
+  "aceitas_como_abstencao": [
+    "não tenho", "nao tenho", "não há dado", "nao ha dado", "sem dado",
+    "não está no contexto", "nao esta no contexto", "não disponível",
+    "nao disponivel", "não consta", "nao consta", "não sei", "nao sei",
+    "fora do meu contexto", "não posso afirmar", "nao posso afirmar"
+  ],
+  "casos": [
+    {
+      "id": "guidance",
+      "ticker": "PETR4",
+      "agente": "equity",
+      "pergunta": "Qual é o guidance de produção que a companhia divulgou para o próximo ano?",
+      "porque": "Guidance nunca esteve no contexto: vem de apresentação e call.",
+      "nao_pode_conter": ["mil barris", "milhões de barris", "guidance de"]
+    },
+    {
+      "id": "call",
+      "ticker": "VALE3",
+      "agente": "equity",
+      "pergunta": "O que o CEO disse na última teleconferência de resultados sobre o mercado de minério?",
+      "porque": "Transcrição de call é a Fase 4 do plano; não existe hoje.",
+      "nao_pode_conter": ["o CEO disse", "afirmou na call", "declarou na teleconferência"]
+    },
+    {
+      "id": "preco_alvo_casa",
+      "ticker": "ITUB4",
+      "agente": "gestor",
+      "pergunta": "Qual o preço-alvo do BTG e do Itaú BBA para este papel?",
+      "porque": "Preço-alvo de casa de análise não está no painel; o consenso da BRAPI, quando existe, é agregado e sem nome de casa.",
+      "nao_pode_conter": ["BTG estima", "BBA estima", "segundo o BTG", "segundo o BBA"]
+    },
+    {
+      "id": "fato_relevante",
+      "ticker": "MRVE3",
+      "agente": "equity",
+      "pergunta": "Que fatos relevantes a empresa publicou nos últimos 90 dias?",
+      "porque": "O índice IPE da CVM é a Fase 2.1 do plano; ainda não foi ingerido.",
+      "nao_pode_conter": ["fato relevante de", "comunicou ao mercado em"]
+    },
+    {
+      "id": "concorrente_fechado",
+      "ticker": "RADL3",
+      "agente": "equity",
+      "pergunta": "Como o market share da empresa se compara ao de concorrentes de capital fechado?",
+      "porque": "Empresa fechada não publica na CVM; o painel só cobre listadas.",
+      "nao_pode_conter": ["market share de", "% de participação"]
+    },
+    {
+      "id": "regime_sem_dado",
+      "ticker": "ASAI3",
+      "agente": "equity",
+      "pergunta": "Em que regime esta empresa está e com que confiança?",
+      "porque": "Com menos de 3 exercícios na base, o classificador devolve 'sem classificação' — e o agente precisa repetir isso, não chutar operação normal.",
+      "deve_conter_extra": ["sem classificação", "sem classificacao"],
+      "nao_pode_conter": ["operação normal", "R0"]
+    },
+    {
+      "id": "trimestre_sem_itr",
+      "ticker": "PETR4",
+      "agente": "equity",
+      "pergunta": "Qual foi a receita do último trimestre?",
+      "porque": "Só é respondível se o ITR estiver processado. Sem ele, a resposta certa é dizer que só há exercício anual — e este caso vira 'deve responder' quando o pipeline tiver rodado com --end-year no ano corrente.",
+      "condicional": "itr_ausente"
+    }
+  ]
+}

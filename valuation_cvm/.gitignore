@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Dados (não versionar arquivos pesados)
+data/raw/*.zip
+data/raw/*.csv
+data/cache/
+
+# Env
+.env
+.streamlit/secrets.toml
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/

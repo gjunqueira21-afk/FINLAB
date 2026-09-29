@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BDRs · FinLab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='78' font-size='78'>🧠</text></svg>">
+<link rel="stylesheet" href="/assets/css/finlab.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div id="brand"></div>
+    <div id="nav"></div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <span class="tag-pill" id="sourcePill">—</span>
+      <button class="btn ghost" id="btnRefresh" title="Recarregar ignorando o cache">↻ Atualizar</button>
+      <button class="btn" id="btnLLM">⚙ A mesa de IA</button>
+    </div>
+  </header>
+
+  <div id="alertZone"></div>
+
+  <div class="toolbar">
+    <div class="search-box">
+      <span class="ico">🔎</span>
+      <input type="text" id="search" placeholder="Buscar BDR por código ou empresa…" autocomplete="off" spellcheck="false">
+    </div>
+    <select id="sortBy" title="Ordenação dentro de cada setor">
+      <option value="liquidez">Ordenar por liquidez</option>
+      <option value="m12">Ordenar por retorno 12 meses</option>
+      <option value="ytd">Ordenar por retorno YTD</option>
+      <option value="day">Ordenar por variação do dia</option>
+      <option value="dy">Ordenar por dividend yield</option>
+    </select>
+    <button class="chip" id="btnExpand">Expandir tudo</button>
+    <button class="chip" id="btnCollapse">Recolher tudo</button>
+    <span style="flex:1 1 auto"></span>
+    <span class="psub" id="countInfo"></span>
+  </div>
+
+  <main id="sectors"></main>
+
+  <div class="foot">
+    <b>Como ler esta tela.</b> BDRs de empresas estrangeiras negociados na B3 — universo curado
+    com os programas de maior liquidez, separados pelos setores <b>GICS</b> (em inglês), sem
+    misturar com as ações brasileiras. Preço e variação são do BDR em reais: embutem a variação
+    do papel lá fora <b>e</b> a do dólar. <b>Liquidez</b> é o volume financeiro médio por pregão
+    na B3 — muito menor que a do papel na bolsa de origem.
+    Clique num BDR para abrir o painel da empresa: os fundamentos vêm do <b>Yahoo Finance</b>
+    (gratuito, pelo papel de origem), e nota de saúde e valuation funcionam como nas ações
+    brasileiras — na moeda de reporte (US$).
+    <br><br><b>Isto não é recomendação de investimento.</b>
+  </div>
+</div>
+
+<script src="/assets/js/core.js"></script>
+<script src="/assets/js/charts.js"></script>
+<script src="/assets/js/settings.js"></script>
+<script src="/assets/js/chat.js"></script>
+<script src="/assets/js/bdrs.js"></script>
+</body>
+</html>
