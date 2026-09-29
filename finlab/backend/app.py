@@ -564,6 +564,25 @@ def api_etf(ticker: str):
     }
 
 
+@app.get("/api/etf/{ticker}/historico")
+def api_etf_historico(ticker: str, janela: str = "12m"):
+    ticker = ticker.upper().strip()
+    if etfs.get(ticker) is None:
+        raise HTTPException(status_code=404, detail=f"ETF fora da lista B3: {ticker}")
+    if janela not in ("1m", "3m", "6m", "12m", "ytd", "max"):
+        raise HTTPException(status_code=400, detail=f"Janela desconhecida: {janela}")
+    serie = market.asset_series([ticker]).get(ticker, [])
+    if janela == "max" and len(serie) < 1000:
+        # histórico longo: o Yahoo cobre anos; funde com o local acumulado
+        longo = market.yahoo_history(ticker, "10y")
+        if longo:
+            serie = market.merge_history({ticker: longo}).get(ticker, serie)
+    rec = etfs.recorta_janela(serie, janela)
+    return {"ticker": ticker, "janela": janela,
+            "serie": [{"d": d, "p": p} for d, p in rec["serie"]],
+            "retorno": rec["retorno"], "pontos": len(rec["serie"])}
+
+
 # ---------------------------------------------------------------------------
 # BDRs
 # ---------------------------------------------------------------------------

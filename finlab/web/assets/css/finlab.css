@@ -1189,3 +1189,5 @@ details.cart-confirm .linha { padding-bottom: 14px; }
 .nd-bar.hot i{background:#F87171}
 .dre-hero td{font-weight:700}
 .dre-margem td{color:var(--dim2);font-size:11px}
+.etf-janelas{display:flex;gap:6px;margin-bottom:10px}
+.etf-janelas .chip.on{background:rgba(103,232,249,.16);border-color:#67E8F9;color:#67E8F9}

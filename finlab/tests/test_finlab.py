@@ -1490,3 +1490,27 @@ def test_series_de_divida_da_petrobras():
     # despesa financeira da Petrobras é negativa (conta de despesa) e grande
     desp = [v for v in s["despesas_financeiras"] if v is not None]
     assert desp and all(v < 0 for v in desp)
+
+
+def test_recorta_janela_do_etf():
+    from finlab.backend import etfs as etfs_mod
+    from datetime import date
+    serie = [(f"2025-{m:02d}-15", 100.0 + m) for m in range(1, 13)]
+    hoje = date(2025, 12, 20)
+    out = etfs_mod.recorta_janela(serie, "3m", hoje=hoje)
+    assert out["serie"][0][0] >= "2025-09-20"
+    assert abs(out["retorno"] - (112.0 / out["serie"][0][1] - 1)) < 1e-9
+    ytd = etfs_mod.recorta_janela(serie, "ytd", hoje=hoje)
+    assert ytd["serie"][0][0] == "2025-01-15"
+    tudo = etfs_mod.recorta_janela(serie, "max", hoje=hoje)
+    assert len(tudo["serie"]) == 12
+
+
+def test_recorta_janela_sem_cobertura_devolve_o_que_ha():
+    from finlab.backend import etfs as etfs_mod
+    from datetime import date
+    serie = [("2025-11-01", 10.0), ("2025-12-01", 11.0)]
+    out = etfs_mod.recorta_janela(serie, "12m", hoje=date(2025, 12, 20))
+    # série curta: devolve os pontos existentes e retorno None (janela não coberta)
+    assert len(out["serie"]) == 2
+    assert out["retorno"] is None

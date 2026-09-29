@@ -8,6 +8,7 @@
   const C = window.FLChart;
 
   const ticker = (new URLSearchParams(window.location.search).get('ticker') || 'BOVA11').toUpperCase();
+  let janelaAtiva = '12m';
 
   function miniStat(label, value, sub, cls) {
     return h('div', {}, [
@@ -23,6 +24,8 @@
     document.title = `${d.ticker} · FinLab`;
     const perf = d.perf || {};
 
+    el('strip').innerHTML = '';
+    el('content').innerHTML = '';
     el('strip').appendChild(h('section', { class: 'panel tight' }, [
       h('div', { style: 'display:flex;align-items:center;gap:18px;flex-wrap:wrap' }, [
         h('div', {}, [
@@ -76,30 +79,50 @@
       })
     ]));
 
-    // Preço ----------------------------------------------------------------
-    const serie = (d.price_series || []).map((p, i) => ({ x: i, y: p.p }));
-    const labels = (d.price_series || []).map((p) => p.d);
-    if (serie.length > 3) {
-      host.appendChild(h('section', { class: 'panel' }, [
-        h('div', { class: 'panel-h' }, [
-          h('div', { class: 'ptitle' }, [h('b', {}, 'Preço de fechamento')]),
-          h('div', { class: 'psub' }, `${serie.length} pregões · ${esc(d.source || '')}`)
-        ]),
-        h('div', { class: 'chartbox', id: 'chartPx', style: 'height:260px' })
-      ]));
-      setTimeout(() => {
-        C.line(el('chartPx'), {
-          height: 260,
-          xMin: 0, xMax: serie.length - 1,
-          xTickValues: serie.filter((_, i) => i % Math.ceil(serie.length / 7) === 0).map((p) => p.x),
-          xFormat: (v) => fmt.date(labels[Math.round(v)] || '').slice(0, 5),
-          yFormat: (v) => fmt.num(v, 0),
-          series: [{ name: d.ticker, color: '#67E8F9', width: 2.2, points: serie,
-                     fill: 'rgba(103,232,249,.08)' }],
-          tipFormat: (p) => `<span class="k">${fmt.date(labels[Math.round(p.x)])}</span> · ${fmt.money(p.y)}`
-        });
-      }, 0);
+    // Preço por janela ------------------------------------------------------
+    host.appendChild(h('section', { class: 'panel' }, [
+      h('div', { class: 'panel-h' }, [
+        h('div', { class: 'ptitle' }, [h('b', {}, 'Preço de fechamento')]),
+        h('div', { class: 'psub', id: 'pxInfo' }, '')
+      ]),
+      h('div', { class: 'etf-janelas', id: 'janelas' },
+        ['1m', '3m', '6m', '12m', 'ytd', 'max'].map((j) =>
+          h('button', { class: 'chip', 'data-j': j }, j.toUpperCase()))),
+      h('div', { class: 'chartbox', id: 'chartPx', style: 'height:280px' })
+    ]));
+
+    async function desenhaJanela(j) {
+      janelaAtiva = j;
+      Array.from(el('janelas').children).forEach((b) =>
+        b.classList.toggle('on', b.dataset.j === j));
+      let hist;
+      try {
+        hist = await api('/api/etf/' + encodeURIComponent(d.ticker) + '/historico?janela=' + j);
+      } catch (e) {
+        el('pxInfo').textContent = 'histórico indisponível: ' + e.message;
+        return;
+      }
+      const serie = (hist.serie || []).map((p, i) => ({ x: i, y: p.p }));
+      const labels = (hist.serie || []).map((p) => p.d);
+      el('pxInfo').textContent = `${serie.length} pregões · ${d.source || ''} · retorno na janela: `
+        + (isNum(hist.retorno) ? fmt.pctSigned(hist.retorno) : 'janela não coberta pela série');
+      if (serie.length < 2) { el('chartPx').innerHTML = ''; return; }
+      C.line(el('chartPx'), {
+        height: 280, xMin: 0, xMax: serie.length - 1,
+        xTickValues: serie.filter((_, i) => i % Math.ceil(serie.length / 7) === 0).map((p) => p.x),
+        xFormat: (v) => fmt.date(labels[Math.round(v)] || '').slice(0, 5),
+        yFormat: (v) => fmt.num(v, 0),
+        series: [{ name: d.ticker, width: 2.2, points: serie,
+          color: isNum(hist.retorno) && hist.retorno < 0 ? '#F87171' : '#34D399',
+          fill: isNum(hist.retorno) && hist.retorno < 0 ? 'rgba(248,113,113,.08)' : 'rgba(52,211,153,.08)' }],
+        tipFormat: (p) => `<span class="k">${fmt.date(labels[Math.round(p.x)])}</span> · ${fmt.money(p.y)}`
+      });
     }
+    el('janelas').addEventListener('click', (ev) => {
+      const b = ev.target.closest('button[data-j]');
+      if (b) desenhaJanela(b.dataset.j);
+    });
+    desenhaJanela(janelaAtiva);
 
     // Pares ------------------------------------------------------------------
     const pares = d.peers || [];
