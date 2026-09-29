@@ -1514,3 +1514,13 @@ def test_recorta_janela_sem_cobertura_devolve_o_que_ha():
     # série curta: devolve os pontos existentes e retorno None (janela não coberta)
     assert len(out["serie"]) == 2
     assert out["retorno"] is None
+
+
+def test_requirements_acompanham_o_codigo():
+    """O launcher instala finlab/requirements.txt: ele tem de cobrir a suíte
+    (httpx do TestClient) e não pode arrastar dependência de módulo removido."""
+    req = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(encoding="utf-8")
+    assert "httpx" in req
+    assert "pypdf" not in req      # docs.py saiu no V2
+    assert "openpyxl" not in req   # xlsx_dcf.py saiu no V2
+    assert "yfinance" in req       # fundamentos de BDR

@@ -197,9 +197,12 @@
         isNum(st.nd_ebitda) ? `mediana do setor: ${fmt.mult(st.nd_ebitda)}` : '', cls),
       stat('Cobertura de juros', fmt.mult(last('cobertura_juros')),
         isNum(st.cobertura_juros) ? `mediana do setor: ${fmt.mult(st.cobertura_juros)}` : 'EBITDA ÷ juros'),
-      stat('Curto prazo', fmt.pct(last('curto_prazo_pct')), 'da dívida bruta'),
-      stat('Caixa ÷ dívida CP', fmt.mult(last('liquidez_imediata')), 'liquidez imediata'),
-      stat('Custo aparente', fmt.pct(last('custo_aparente')), 'juros ÷ dívida média')
+      stat('Curto prazo', fmt.pct(last('curto_prazo_pct')),
+        isNum(st.curto_prazo_pct) ? `mediana do setor: ${fmt.pct(st.curto_prazo_pct)}` : 'da dívida bruta'),
+      stat('Caixa ÷ dívida CP', fmt.mult(last('liquidez_imediata')),
+        isNum(st.liquidez_imediata) ? `mediana do setor: ${fmt.mult(st.liquidez_imediata)}` : 'liquidez imediata'),
+      stat('Custo aparente', fmt.pct(last('custo_aparente')),
+        isNum(st.custo_aparente) ? `mediana do setor: ${fmt.pct(st.custo_aparente)}` : 'juros ÷ dívida média')
     ]);
   }
 

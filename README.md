@@ -26,7 +26,7 @@ Saiu nesta versão: a mesa de IA e o valuation interativo (DCF/EPV) da v1.
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python -m pip install fastapi "uvicorn[standard]" pandas pyarrow requests python-dotenv pytest httpx
+.venv\Scripts\python -m pip install -r finlab\requirements.txt
 
 # base CVM (primeira vez e a cada trimestre; demora — baixa os dados da CVM):
 cd valuation_cvm

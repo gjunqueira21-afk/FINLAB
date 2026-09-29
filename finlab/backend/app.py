@@ -88,8 +88,9 @@ def _fundamentals(ticker: str) -> dict:
     # A versão na chave sobe SEMPRE que o formato do payload muda. O cache vive
     # em disco com TTL de 24 h: sem o bump, quem der git pull passa um dia
     # inteiro vendo o painel novo alimentado pelo blob antigo.
-    # v5: séries de dívida CP/LP e despesas financeiras (V2).
-    return cache.memoize(f"fund:v5:{ticker}", TTL_CVM, lambda: metrics.fundamentals(ticker)) or {}
+    # v6: séries de dívida CP/LP e despesas financeiras (V2) — o v5 chegou a
+    # ser gravado ANTES dessas séries existirem, então o bump é duplo.
+    return cache.memoize(f"fund:v6:{ticker}", TTL_CVM, lambda: metrics.fundamentals(ticker)) or {}
 
 
 def _ltm(cd_cvm: Optional[str]) -> dict:
@@ -97,7 +98,7 @@ def _ltm(cd_cvm: Optional[str]) -> dict:
     a tela principal pede os 90 de uma vez, e o ITR só muda com o pipeline."""
     if not cd_cvm:
         return {}
-    return cache.memoize(f"ltm:v2:{cd_cvm}", TTL_CVM, lambda: cvm.ltm_series(cd_cvm)) or {}
+    return cache.memoize(f"ltm:v3:{cd_cvm}", TTL_CVM, lambda: cvm.ltm_series(cd_cvm)) or {}
 
 
 def _overview_rows() -> dict:
@@ -406,12 +407,15 @@ def api_company_divida(ticker: str):
                     "Instituição financeira: alavancagem se lê por Ativo/PL e "
                     "capital regulatório, não por dívida líquida/EBITDA."]}
 
+    eh_bdr = comp is None
     anos = fund.get("years") or []
     calc = divida.indicadores(anos, fund.get("series") or {})
 
     avisos = []
     if not anos:
-        avisos.append("Sem demonstrações processadas da CVM para este ticker — "
+        avisos.append("Sem demonstrações do Yahoo para este BDR agora — "
+                      "recarregue mais tarde." if eh_bdr else
+                      "Sem demonstrações processadas da CVM para este ticker — "
                       "rode o pipeline em valuation_cvm.")
 
     # Retrato mais recente: saldo do último ITR quando existir, senão o da DFP.
@@ -433,15 +437,21 @@ def api_company_divida(ticker: str):
                  "divida_bruta": calc["series"]["divida_bruta"][i],
                  "caixa_total": calc["series"]["caixa_total"][i],
                  "nd_ebitda": calc["series"]["nd_ebitda"][i],
-                 "fonte": "CVM · DFP", "rotulo": f"exercício {anos[i]}"}
+                 # BDR não passa pela CVM: as demonstrações vêm do Yahoo, em
+                 # USD — a etiqueta de origem tem de dizer isso.
+                 "fonte": "Yahoo Finance · USD" if eh_bdr else "CVM · DFP",
+                 "rotulo": f"exercício {anos[i]}"}
 
-    # Mediana do setor (só para ações B3): ND/EBITDA do overview + cobertura
-    # calculada dos fundamentos dos pares (cache de 24h já absorve o custo).
+    # Medianas do setor (só para ações B3): ND/EBITDA do overview + as demais
+    # calculadas dos fundamentos do setor inteiro, empresa incluída — a mesma
+    # base da mediana de ND/EBITDA (cache de 24h já absorve o custo).
     setor = {}
     if comp is not None:
         stats = (_overview_rows().get("sector_stats") or {}).get(comp.sector) or {}
-        coberturas = []
-        for tk in universe.peers(ticker):
+        chaves = ("cobertura_juros", "curto_prazo_pct", "liquidez_imediata",
+                  "custo_aparente")
+        valores: dict[str, list] = {k: [] for k in chaves}
+        for tk in [ticker] + universe.peers(ticker):
             f = _fundamentals(tk)
             if not f or f.get("financial"):
                 continue
@@ -449,14 +459,13 @@ def api_company_divida(ticker: str):
             if not an:
                 continue
             c = divida.indicadores(an, f.get("series") or {})
-            v = c["series"]["cobertura_juros"][-1]
-            if v is not None:
-                coberturas.append(v)
-        coberturas.sort()
-        setor = {"nd_ebitda": stats.get("nd_ebitda"),
-                 "cobertura_juros": (coberturas[len(coberturas) // 2]
-                                     if coberturas else None),
-                 "n": stats.get("n")}
+            for k in chaves:
+                v = c["series"][k][-1]
+                if v is not None:
+                    valores[k].append(v)
+        setor = {"nd_ebitda": stats.get("nd_ebitda"), "n": stats.get("n")}
+        for k in chaves:
+            setor[k] = round(statistics.median(valores[k]), 4) if valores[k] else None
 
     return {"ticker": ticker, "financial": False, "anos": anos,
             "series": calc["series"], "atual": atual, "setor": setor,
