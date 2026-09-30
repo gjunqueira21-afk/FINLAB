@@ -11,6 +11,7 @@ venv
 finlab/.env
 valuation_cvm/.env
 deploy/.env
+deploy/.env.bak
 
 # Caches e dados de execução: vivem nos volumes, não na imagem
 finlab/data/cache
