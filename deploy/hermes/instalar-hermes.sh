@@ -89,7 +89,19 @@ for c in $CONTEINERES; do
         cat > "$1/skills/finlab-carteiras/SKILL.md"' _ "$DIR" < "$SKILL"
     netrc | docker exec -i "$c" sh -c 'umask 077; cat > "$1/finlab.netrc" &&
         chmod 600 "$1/finlab.netrc"' _ "$DIR"
-    echo "   skill e credencial gravadas em $DIR"
+    # O docker exec grava como root, mas o Hermes costuma rodar como um
+    # usuário próprio ("hermes"): com o netrc em root:root 600 ele não lê o
+    # login. Os arquivos passam para o usuário do Hermes — ou, sem esse
+    # usuário, para o dono da pasta dele.
+    DONO=$(docker exec "$c" sh -c '
+        if id hermes >/dev/null 2>&1; then echo "$(id -u hermes):$(id -g hermes)"
+        else stat -c %u:%g "$1" 2>/dev/null; fi' _ "$DIR" || true)
+    if [ -n "$DONO" ]; then
+        docker exec "$c" chown -R "$DONO" "$DIR/skills/finlab-carteiras" "$DIR/finlab.netrc"
+        # a pasta skills/ pode ter nascido agora, como root: devolve ao Hermes
+        docker exec "$c" chown "$DONO" "$DIR/skills"
+    fi
+    echo "   skill e credencial gravadas em $DIR (dono ${DONO:-inalterado})"
 
     # Fica no disco da VPS (volume) ou só dentro do contêiner? Só no
     # contêiner some se ele for recriado (atualização do Hermes).
@@ -100,7 +112,8 @@ for c in $CONTEINERES; do
     done < <(docker inspect "$c" --format '{{range .Mounts}}{{.Destination}}{{println}}{{end}}')
     [ "$PERSISTE" = sim ] || echo "   [aviso] $DIR não está num volume: se o contêiner for recriado, rode este script de novo."
 
-    CODIGO=$(docker exec "$c" sh -c 'command -v curl >/dev/null || { echo sem-curl; exit 0; }
+    COMO=(); [ -n "$DONO" ] && COMO=(-u "$DONO")
+    CODIGO=$(docker exec "${COMO[@]}" "$c" sh -c 'command -v curl >/dev/null || { echo sem-curl; exit 0; }
         curl -s -o /dev/null -w "%{http_code}" --max-time 20 --netrc-file "$1/finlab.netrc" "$2" || true' \
         _ "$DIR" "$URL")
     relata_teste "$c" "$CODIGO"
