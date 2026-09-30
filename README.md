@@ -64,6 +64,7 @@ No Windows, agende no **Agendador de Tarefas** apontando para
 |---|---|
 | `finlab/` | O painel: backend FastAPI + front-end sem dependências externas |
 | `valuation_cvm/` | Pipeline que baixa e processa as demonstrações da CVM (parquets) |
+| `deploy/` | Docker para publicar na VPS (Hostinger) com HTTPS e senha — ver `deploy/README.md` |
 
 ---
 
