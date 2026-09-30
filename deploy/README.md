@@ -46,6 +46,7 @@ Quando aparecer `FinLab no ar`, acesse `https://seu-dominio` e faça login.
 | Atualizar as carteiras acompanhadas (cota, alertas, lâminas) | `bash atualizar-carteiras.sh` |
 | Ver os logs | `docker compose logs -f finlab` |
 | Parar / subir | `docker compose down` / `docker compose up -d` |
+| Trocar a senha do painel | `bash trocar-senha.sh` |
 
 Para os dados se atualizarem sozinhos toda segunda às 6h:
 
@@ -90,3 +91,30 @@ iguais.
 
 Se 80/443 estiverem ocupadas por outra coisa que não um Traefik, o
 instalador para e mostra como descobrir quem ocupa.
+
+## Agente na mesma VPS (Hermes) editando as carteiras
+
+O Hermes edita as carteiras monitoradas pela **mesma API que a aba Carteiras
+usa** — o que ele mudar aparece na aba na hora. Ele não pilota o navegador:
+usa `curl` com o login do painel, lido de um arquivo protegido
+(`~/.hermes/finlab.netrc`, `chmod 600`). A senha não passa pelo chat nem pela
+linha de comando do agente, e o painel continua fechado para a internet como
+antes.
+
+Uma vez, como o usuário que roda o Hermes (em geral root):
+
+```bash
+bash /root/FINLAB/deploy/hermes/instalar-hermes.sh
+```
+
+O script copia a skill `finlab-carteiras` (em `deploy/hermes/`) para
+`~/.hermes/skills/`, pede a senha do painel sem mostrá-la, grava o `netrc` e
+testa o acesso. Depois reinicie o Hermes (ou abra uma conversa nova) e peça,
+por exemplo: "muda o target price de ITUB4 na carteira Dividendos para 48".
+
+A skill obriga o Hermes a ler a carteira antes de editar, a mandar a
+composição completa (uma posição fora da lista sai da carteira) e a pedir sua
+confirmação antes de excluir carteira, tirar papel ou rebalancear.
+
+Se trocar a senha do painel (`trocar-senha.sh`), rode o `instalar-hermes.sh`
+de novo para o Hermes receber a nova.

@@ -32,4 +32,5 @@ valuation_cvm/data/raw/docs/
 .idea/
 .DS_Store
 deploy/.env
+deploy/.env.bak
 .superpowers/
