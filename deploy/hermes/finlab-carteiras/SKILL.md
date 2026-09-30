@@ -19,12 +19,15 @@ senha — só aponta o `curl` para o arquivo:
 
 ```bash
 FINLAB="https://finlab.marketwatchrf.com"
-NETRC="$HOME/.hermes/finlab.netrc"
+# o arquivo fica na pasta do Hermes; este laço acha onde ela está
+NETRC=$(for d in "$HERMES_HOME" "$HOME/.hermes" /opt/data/.hermes /opt/data /root/.hermes; do
+  [ -n "$d" ] && [ -f "$d/finlab.netrc" ] && { echo "$d/finlab.netrc"; break; }; done)
 curl -sS --fail-with-body --netrc-file "$NETRC" "$FINLAB/api/carteiras"
 ```
 
-Se o arquivo não existir ou a resposta for `401`, pare e peça ao usuário para
-criar/atualizar o `finlab.netrc` (instruções em `deploy/README.md` do FinLab).
+Se `NETRC` sair vazio (arquivo não encontrado) ou a resposta for `401`, pare
+e peça ao usuário para rodar `bash /root/FINLAB/deploy/hermes/instalar-hermes.sh`
+na VPS.
 Não tente outro caminho de login.
 
 Para enviar JSON, use sempre um heredoc (evita erro de aspas):

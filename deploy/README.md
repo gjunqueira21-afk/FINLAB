@@ -107,10 +107,17 @@ Uma vez, como o usuário que roda o Hermes (em geral root):
 bash /root/FINLAB/deploy/hermes/instalar-hermes.sh
 ```
 
-O script copia a skill `finlab-carteiras` (em `deploy/hermes/`) para
-`~/.hermes/skills/`, pede a senha do painel sem mostrá-la, grava o `netrc` e
-testa o acesso. Depois reinicie o Hermes (ou abra uma conversa nova) e peça,
-por exemplo: "muda o target price de ITUB4 na carteira Dividendos para 48".
+O script acha o Hermes sozinho: se ele roda em contêiner (o caso da
+Hostinger, `hermes-agent-*`), instala em **todos** os contêineres com
+"hermes" no nome, dentro da pasta de cada um; senão, em `~/.hermes`. Pede a
+senha do painel uma vez, sem mostrá-la, grava a skill `finlab-carteiras` e o
+`finlab.netrc` e testa o acesso de dentro de cada um. Para escolher os
+contêineres: `HERMES_CONTAINERS="nome1 nome2" bash …`. Depois abra uma conversa
+nova com o Hermes (/new) e peça, por exemplo: "muda o target price de ITUB4
+na carteira Dividendos para 48".
+
+Se o script avisar que a pasta não está num volume, a instalação some quando
+o contêiner for recriado (atualização do Hermes): é só rodar de novo.
 
 A skill obriga o Hermes a ler a carteira antes de editar, a mandar a
 composição completa (uma posição fora da lista sai da carteira) e a pedir sua

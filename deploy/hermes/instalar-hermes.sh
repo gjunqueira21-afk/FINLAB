@@ -1,27 +1,40 @@
 #!/bin/bash
-# Dá ao Hermes (agente rodando nesta VPS) acesso às carteiras do FinLab.
+# Dá ao Hermes acesso às carteiras do FinLab.
 #
 #   1. copia a skill finlab-carteiras para a pasta de skills do Hermes;
 #   2. grava o login do painel num arquivo netrc (chmod 600) que o curl do
 #      Hermes lê — a senha é digitada aqui, sem aparecer na tela, e nunca
 #      passa pelo chat nem pela linha de comando do agente.
 #
-# Rode como o MESMO usuário que roda o Hermes (em geral root):
+# Funciona com o Hermes em contêiner Docker (o caso da Hostinger: um ou mais
+# contêineres hermes-agent-*) e com o Hermes instalado direto na VPS:
+#
 #   bash /root/FINLAB/deploy/hermes/instalar-hermes.sh
+#
+# Com contêineres, instala em TODOS os que tiverem "hermes" no nome. Para
+# escolher: HERMES_CONTAINERS="hermes-agent-abcd-hermes-agent-1" bash ...
+# Sem contêiner, usa ~/.hermes (ou HERMES_HOME=/caminho bash ...).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-HERMES_DIR="${HERMES_HOME:-$HOME/.hermes}"
-if [ ! -d "$HERMES_DIR" ]; then
-    echo "[ERRO] Não achei a pasta do Hermes em $HERMES_DIR."
-    echo "       Se ela estiver em outro lugar: HERMES_HOME=/caminho bash $0"
-    exit 1
-fi
+SKILL=finlab-carteiras/SKILL.md
+[ -f "$SKILL" ] || { echo "[ERRO] Não achei $SKILL."; exit 1; }
 
-# --- skill --------------------------------------------------------------------
-mkdir -p "$HERMES_DIR/skills/finlab-carteiras"
-cp finlab-carteiras/SKILL.md "$HERMES_DIR/skills/finlab-carteiras/SKILL.md"
-echo "-> skill copiada para $HERMES_DIR/skills/finlab-carteiras/"
+# --- onde instalar ------------------------------------------------------------
+CONTEINERES=${HERMES_CONTAINERS:-}
+if [ -z "$CONTEINERES" ] && [ -z "${HERMES_HOME:-}" ] && command -v docker >/dev/null 2>&1; then
+    CONTEINERES=$(docker ps --format '{{.Names}}' | grep -i hermes || true)
+fi
+HOST_DIR=""
+if [ -z "$CONTEINERES" ]; then
+    HOST_DIR="${HERMES_HOME:-$HOME/.hermes}"
+    if [ ! -d "$HOST_DIR" ]; then
+        echo "[ERRO] Não achei o Hermes: nenhum contêiner com 'hermes' no nome e"
+        echo "       nenhuma pasta $HOST_DIR. Se ela estiver em outro lugar:"
+        echo "       HERMES_HOME=/caminho bash $0"
+        exit 1
+    fi
+fi
 
 # --- credencial ---------------------------------------------------------------
 ENV_FILE=../.env
@@ -32,22 +45,72 @@ DOMINIO=${D:-${DOMINIO:-finlab.marketwatchrf.com}}
 read -r -p "Usuário do painel [${USUARIO:-ADMIN}]: " U
 USUARIO=${U:-${USUARIO:-ADMIN}}
 read -r -s -p "Senha do painel (não aparece na tela): " SENHA; echo
-if [ -z "$SENHA" ]; then echo "[ERRO] Senha vazia."; exit 1; fi
+[ -n "$SENHA" ] || { echo "[ERRO] Senha vazia."; exit 1; }
+netrc() { printf 'machine %s\nlogin %s\npassword %s\n' "$DOMINIO" "$USUARIO" "$SENHA"; }
 
-NETRC="$HERMES_DIR/finlab.netrc"
-umask 077
-printf 'machine %s\nlogin %s\npassword %s\n' "$DOMINIO" "$USUARIO" "$SENHA" > "$NETRC"
-chmod 600 "$NETRC"
+URL="https://$DOMINIO/api/carteiras"
+FALHAS=0
+
+relata_teste() {  # $1 = rótulo, $2 = código HTTP
+    case "$2" in
+        200) echo "   teste OK: lê e edita as carteiras." ;;
+        401) echo "   [ATENÇÃO] HTTP 401: usuário ou senha errados — rode de novo."; FALHAS=1 ;;
+        sem-curl) echo "   [ATENÇÃO] não há curl em $1; a skill precisa dele."; FALHAS=1 ;;
+        *)   echo "   [ATENÇÃO] teste devolveu '$2' (esperado 200): $1 não alcançou $URL."; FALHAS=1 ;;
+    esac
+}
+
+# --- Hermes direto na VPS -----------------------------------------------------
+if [ -n "$HOST_DIR" ]; then
+    echo "-> Hermes em $HOST_DIR"
+    mkdir -p "$HOST_DIR/skills/finlab-carteiras"
+    cp "$SKILL" "$HOST_DIR/skills/finlab-carteiras/SKILL.md"
+    ( umask 077; netrc > "$HOST_DIR/finlab.netrc" ); chmod 600 "$HOST_DIR/finlab.netrc"
+    echo "   skill e credencial gravadas"
+    relata_teste "a VPS" "$(curl -s -o /dev/null -w '%{http_code}' --netrc-file \
+                           "$HOST_DIR/finlab.netrc" "$URL" || true)"
+fi
+
+# --- Hermes em contêineres ------------------------------------------------------
+# Tudo é resolvido DENTRO de cada contêiner: a pasta do Hermes (HERMES_HOME,
+# ~/.hermes ou /opt/data) e o curl. A senha entra pelo stdin do docker exec —
+# não aparece em argumento de processo nem no histórico.
+ACHA_DIR='for d in "$HERMES_HOME" "$HOME/.hermes" /opt/data/.hermes /opt/data /root/.hermes; do
+    [ -n "$d" ] && [ -d "$d" ] && { echo "$d"; exit 0; }
+done; exit 1'
+
+for c in $CONTEINERES; do
+    echo "-> contêiner $c"
+    if ! DIR=$(docker exec "$c" sh -c "$ACHA_DIR"); then
+        echo "   [ATENÇÃO] não achei a pasta do Hermes dentro dele; pulei."
+        FALHAS=1; continue
+    fi
+    docker exec -i "$c" sh -c 'mkdir -p "$1/skills/finlab-carteiras" &&
+        cat > "$1/skills/finlab-carteiras/SKILL.md"' _ "$DIR" < "$SKILL"
+    netrc | docker exec -i "$c" sh -c 'umask 077; cat > "$1/finlab.netrc" &&
+        chmod 600 "$1/finlab.netrc"' _ "$DIR"
+    echo "   skill e credencial gravadas em $DIR"
+
+    # Fica no disco da VPS (volume) ou só dentro do contêiner? Só no
+    # contêiner some se ele for recriado (atualização do Hermes).
+    PERSISTE=nao
+    while read -r destino; do
+        [ -n "$destino" ] || continue   # contêiner sem volume: linha vazia
+        case "$DIR/" in "${destino%/}/"*) PERSISTE=sim ;; esac
+    done < <(docker inspect "$c" --format '{{range .Mounts}}{{.Destination}}{{println}}{{end}}')
+    [ "$PERSISTE" = sim ] || echo "   [aviso] $DIR não está num volume: se o contêiner for recriado, rode este script de novo."
+
+    CODIGO=$(docker exec "$c" sh -c 'command -v curl >/dev/null || { echo sem-curl; exit 0; }
+        curl -s -o /dev/null -w "%{http_code}" --max-time 20 --netrc-file "$1/finlab.netrc" "$2" || true' \
+        _ "$DIR" "$URL")
+    relata_teste "$c" "$CODIGO"
+done
 unset SENHA
-echo "-> credencial gravada em $NETRC (só o dono lê)"
 
-# --- teste --------------------------------------------------------------------
-CODIGO=$(curl -s -o /dev/null -w '%{http_code}' --netrc-file "$NETRC" \
-         "https://$DOMINIO/api/carteiras" || true)
-if [ "$CODIGO" = 200 ]; then
-    echo "-> teste OK: o Hermes já consegue ler e editar as carteiras."
-    echo "   Reinicie o Hermes (ou abra uma conversa nova) para ele carregar a skill."
+echo
+if [ "$FALHAS" = 0 ]; then
+    echo "Pronto. No chat do Hermes, comece uma conversa nova (/new) para ele"
+    echo "carregar a skill finlab-carteiras."
 else
-    echo "[ATENÇÃO] O teste devolveu HTTP $CODIGO (esperado 200)."
-    echo "          401 = usuário ou senha errados: rode este script de novo."
+    echo "Terminou com avisos (acima). Mande o print para ajustar."
 fi
