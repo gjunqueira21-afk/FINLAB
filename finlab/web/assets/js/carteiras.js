@@ -2,12 +2,12 @@
 
    A carteira já nasceu validada no servidor; aqui é leitura, acompanhamento
    e as ações com gate humano — atualizar, rebalancear, editar, excluir
-   (digitando o nome), lâmina e research. O gráfico compara a cota com o
+   (digitando o nome) e lâmina. O gráfico compara a cota com o
    BOVA11 comprado no dia da criação, as duas séries na mesma base 100. */
 (function () {
   'use strict';
 
-  const { fmt, api, el, h, esc, isNum, signClass, markdown, loadSlots } = window.FL;
+  const { fmt, api, el, h, esc, isNum, signClass } = window.FL;
 
   const state = { detalhe: null };
 
@@ -39,11 +39,26 @@
     return !!m && m !== (c.nome || '').trim().toLowerCase();
   }
 
-  function slotAtivo() {
-    return loadSlots().find((s) => s.api_key && s.model) || null;
-  }
-
   /* -------------------------------------------------------------- lista */
+
+  function sparkline(cotas) {
+    if (!cotas || cotas.length < 2) return null;
+    const min = Math.min.apply(null, cotas), max = Math.max.apply(null, cotas);
+    const W = 110, H = 28, span = (max - min) || 1;
+    const pts = cotas.map((c, i) =>
+      `${(i / (cotas.length - 1) * W).toFixed(1)},${(H - 3 - (c - min) / span * (H - 6)).toFixed(1)}`);
+    const cor = cotas[cotas.length - 1] >= cotas[0] ? '#34D399' : '#F87171';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('class', 'cart-spark');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    path.setAttribute('points', pts.join(' '));
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', cor);
+    path.setAttribute('stroke-width', '1.8');
+    svg.appendChild(path);
+    return svg;
+  }
 
   function cardCarteira(r) {
     const dif = (isNum(r.retorno) && isNum(r.retorno_bench))
@@ -55,10 +70,13 @@
     }, [
       h('div', { class: 'topo' }, [
         h('b', { class: 'nome' }, r.nome),
-        h('span', { class: 'tag-pill' }, r.origem === 'mesa' ? '🧠 mesa' : '✍ manual'),
+        h('span', { class: 'tag-pill' }, r.origem === 'mesa' ? '🧠 legado' : '✍ manual'),
+        r.n_alvos ? h('span', { class: 'tag-pill good', title: 'posições que atingiram o target price' },
+          '❗ ' + r.n_alvos + ' no alvo') : null,
         r.n_alertas ? h('span', { class: 'tag-pill warn' }, `⚠ ${r.n_alertas} fora da banda`) : null
       ]),
       mandatoUtil(r) ? h('div', { class: 'mandato' }, r.mandato) : null,
+      sparkline(r.serie_curta),
       h('div', { class: 'nums' }, [
         h('span', {}, [h('i', {}, 'cota '), h('b', {}, fmt.num(r.cota, 2))]),
         h('span', { class: signClass(r.retorno) }, fmt.pctSigned(r.retorno)),
@@ -72,25 +90,6 @@
         `criada em ${fmt.date(r.criada_em)}` +
         (r.atualizada_em ? ` · atualizada em ${fmt.date(r.atualizada_em)}` : ' · nunca atualizada'))
     ]);
-  }
-
-  async function listaDeep(host) {
-    let dados;
-    try { dados = await api('/api/deep'); } catch (e) { return; }
-    const arr = dados.researches || [];
-    if (!arr.length) return;
-    host.appendChild(h('section', { class: 'cart-deep' }, [
-      h('h3', {}, `📁 Deep researches arquivados (${arr.length})`),
-      h('div', { class: 'psub', style: 'margin-bottom:10px' },
-        'Toda rodada pedida como "deep research" com uma empresa aberta fica gravada em '
-        + '.md na pasta "deep empresas" do servidor.'),
-      h('div', { class: 'grade' }, arr.slice(0, 30).map((d) => h('a', {
-        class: 'linha', href: '/api/deep/' + encodeURIComponent(d.arquivo), target: '_blank'
-      }, [
-        h('b', {}, d.ticker), h('span', {}, fmt.date(d.data)),
-        h('span', { class: 'mut' }, d.arquivo)
-      ])))
-    ]));
   }
 
   async function paginaLista() {
@@ -111,7 +110,9 @@
     const barra = h('div', { class: 'toolbar' }, [
       h('h2', { style: 'font-size:17px' }, 'Carteiras acompanhadas'),
       h('span', { style: 'flex:1 1 auto' }),
-      h('button', { class: 'btn primary', onclick: () => formCarteira(null) }, '＋ Nova carteira manual')
+      (dados.carteiras || []).length >= 10
+        ? h('span', { class: 'psub' }, 'limite de 10 carteiras atingido — exclua uma para criar outra')
+        : h('button', { class: 'btn primary', onclick: () => formCarteira(null) }, '＋ Nova carteira')
     ]);
     host.appendChild(barra);
 
@@ -120,19 +121,11 @@
       host.appendChild(h('div', { class: 'cart-vazio' }, [
         h('div', { class: 'ico' }, '💼'),
         h('h3', {}, 'Nenhuma carteira ainda'),
-        h('p', {}, [
-          'O jeito mais rico de começar é pedir à mesa: abra a ',
-          h('a', { href: '/' }, 'tela de Ações'),
-          ', clique no 🧠 e peça algo como ',
-          h('code', {}, '"monte uma carteira de dividendos com 6 ações"'),
-          '. A proposta chega com pesos, teses e regras — e um botão para salvar aqui.'
-        ]),
-        h('p', {}, 'Ou monte à mão com o botão acima: você escolhe tickers, pesos e a banda de rebalanceamento.')
+        h('p', {}, 'Monte uma carteira com o botão acima: você escolhe tickers, pesos, target price e a banda de rebalanceamento.')
       ]));
     } else {
       host.appendChild(h('div', { class: 'cart-grid' }, lista.map(cardCarteira)));
     }
-    listaDeep(host);
   }
 
   /* ------------------------------------------------- formulário (manual) */
@@ -149,6 +142,9 @@
                      maxlength: '7', spellcheck: 'false' }),
         h('input', { class: 'peso', placeholder: 'peso %', type: 'number', step: 'any',
                      value: p ? String(Math.round(p.peso * 1000) / 10) : '' }),
+        h('input', { class: 'alvo', placeholder: 'target R$', type: 'number', step: 'any',
+                     title: 'target price (opcional): a lâmina marca ❗ quando o preço o atinge',
+                     value: p && isNum(p.alvo) ? String(p.alvo) : '' }),
         h('input', { class: 'tese', placeholder: 'tese (opcional, 1-2 frases)',
                      value: p ? (p.tese || '') : '' }),
         h('button', { class: 'btn ghost sm', title: 'Remover',
@@ -182,6 +178,8 @@
         posicoes: Array.from(posicoes).map((row) => ({
           ticker: row.querySelector('.tk').value.trim().toUpperCase(),
           peso: parseFloat(row.querySelector('.peso').value),
+          alvo: row.querySelector('.alvo').value.trim()
+            ? parseFloat(row.querySelector('.alvo').value) : null,
           tese: row.querySelector('.tese').value.trim()
         })).filter((p) => p.ticker && isNum(p.peso)),
         regras: {}
@@ -224,7 +222,7 @@
       ]),
       h('div', { class: 'psub' },
         'A banda dispara ALERTA quando um peso desvia mais que isso do alvo; as condições '
-        + 'macro/micro são anotações que entram na lâmina e no research — nada aqui executa ordem.'),
+        + 'macro/micro são anotações que entram na lâmina — nada aqui executa ordem.'),
       h('div', { class: 'acoes' }, [
         btnSalvar,
         h('button', { class: 'btn ghost', onclick: () => (editando ? irPara(c.id) : irPara(null)) },
@@ -286,6 +284,8 @@
       h('th', {}, 'Peso alvo'), h('th', {}, 'Peso atual'),
       h('th', { title: 'desvio do peso atual contra o alvo' }, 'Desvio'),
       h('th', { title: 'retorno do papel desde o último rebalanceamento' }, 'Retorno'),
+      h('th', { title: 'target price definido na carteira' }, 'Target'),
+      h('th', { title: 'distância do preço atual até o target' }, 'Upside'),
       comTese ? h('th', { class: 'left' }, 'Tese')
         : h('th', { class: 'left', title: 'barra = peso atual · traço = alvo' }, 'Composição')
     ]);
@@ -302,6 +302,16 @@
         h('td', { class: 'num' }, fmt.pct(pa)),
         h('td', { class: 'num ' + (fora ? 'neg' : 'mut') }, fmt.pctSigned(drift)),
         h('td', { class: 'num ' + signClass(rets[p.ticker]) }, fmt.pctSigned(rets[p.ticker])),
+        (function () {
+          const a = ((c.atual || {}).alvos || {})[p.ticker];
+          return h('td', { class: 'num' },
+            a ? 'R$ ' + fmt.num(a.alvo, 2) + (a.atingido ? ' ❗' : '') : '—');
+        })(),
+        (function () {
+          const a = ((c.atual || {}).alvos || {})[p.ticker];
+          return h('td', { class: 'num ' + (a ? signClass(a.distancia) : 'mut') },
+            a ? fmt.pctSigned(a.distancia) : '—');
+        })(),
         comTese ? h('td', { class: 'left tese' }, p.tese || '—') : barraPeso(pa, p.peso, fora, escala)
       ]);
     }));
@@ -354,41 +364,6 @@
     }
   }
 
-  async function pedirResearch(c, botao) {
-    const slot = slotAtivo();
-    if (!slot) {
-      aviso('Research usa a mesa de IA: configure uma chave em ⚙ Modelos de IA primeiro.');
-      return;
-    }
-    botao.disabled = true;
-    botao.innerHTML = '<span class="spinner"></span> o Gestor está escrevendo…';
-    try {
-      const r = await api('/api/carteiras/' + encodeURIComponent(c.id) + '/research', {
-        method: 'POST',
-        body: JSON.stringify({ slot: { provider: slot.provider, api_key: slot.api_key,
-                                       model: slot.model } })
-      });
-      botao.textContent = '📑 Research completo';
-      botao.disabled = false;
-      const zona = el('cart-research');
-      zona.innerHTML = '';
-      zona.appendChild(h('section', { class: 'cart-research' }, [
-        h('div', { class: 'topo' }, [
-          h('h3', {}, `Research · ${c.nome}`),
-          h('span', { class: 'psub' }, `${r.modelo} · arquivado no servidor como ${r.arquivo}`),
-          h('span', { style: 'flex:1 1 auto' }),
-          h('button', { class: 'btn ghost sm', onclick: () => { zona.innerHTML = ''; } }, '✕')
-        ]),
-        h('div', { class: 'corpo', html: markdown(r.texto) })
-      ]));
-      zona.scrollIntoView({ behavior: 'smooth' });
-    } catch (err) {
-      botao.disabled = false;
-      botao.textContent = '📑 Research completo';
-      aviso('⚠ ' + err.message, 'bad');
-    }
-  }
-
   function render(c) {
     const host = el('conteudo');
     host.innerHTML = '';
@@ -408,25 +383,21 @@
         acaoDetalhe(c.id, '/rebalancear', btnRebal, '⚖ Rebalancear');
       }
     });
-    const btnResearch = h('button', { class: 'btn' }, '📑 Research completo');
-    btnResearch.addEventListener('click', () => pedirResearch(c, btnResearch));
 
     host.appendChild(h('div', { class: 'toolbar' }, [
       h('a', { class: 'btn ghost sm', href: '/carteiras' }, '← carteiras'),
-      h('h2', { style: 'font-size:17px' }, c.nome),
-      h('span', { class: 'tag-pill' }, c.origem === 'mesa' ? '🧠 proposta da mesa' : '✍ manual'),
+      h('div', {}, [
+        h('h2', { style: 'font-size:17px;margin:0' }, c.nome),
+        h('div', { class: 'psub' }, 'lâmina da carteira · base 100 em ' + fmt.date(c.criada_em)
+          + (mandatoUtil(c) ? ' · ' + c.mandato : ''))
+      ]),
       h('span', { style: 'flex:1 1 auto' }),
       btnAtualizar, btnRebal,
       h('a', { class: 'btn', href: '/api/carteiras/' + encodeURIComponent(c.id) + '/lamina.md',
                target: '_blank', title: 'A lâmina quantitativa em markdown — a mesma que o cron gera' },
         '📄 Lâmina'),
-      btnResearch,
       h('button', { class: 'btn ghost', onclick: () => formCarteira(c) }, '✎ Editar')
     ]));
-
-    if (mandatoUtil(c)) {
-      host.appendChild(h('p', { class: 'cart-mandato' }, c.mandato));
-    }
 
     (atual.avisos || []).forEach((a) => host.appendChild(h('div', { class: 'callout warn' }, '⚠ ' + a)));
 
@@ -445,8 +416,21 @@
           ? `índice no período: ${fmt.pctSigned(atual.retorno_bench)}` : 'benchmark indisponível'),
       kpi(nAlertas ? 'warn' : 'good', 'Banda',
         nAlertas ? `${nAlertas} fora` : 'dentro',
-        `alerta a ±${(((c.regras || {}).banda || 0.05) * 100).toFixed(0)} p.p. do alvo`)
+        `alerta a ±${(((c.regras || {}).banda || 0.05) * 100).toFixed(0)} p.p. do alvo`),
+      kpi('info', 'Janelas', (c.janelas || []).map((j) =>
+          j.carteira !== null ? `${j.nome.toLowerCase()} ${fmt.pctSigned(j.carteira)}` : null)
+        .filter(Boolean).join(' · ') || '—', 'carteira por período'),
+      kpi('', 'Risco', isNum((c.metricas || {}).drawdown_max)
+          ? `DD ${fmt.pctSigned(c.metricas.drawdown_max)}` : '—',
+        isNum((c.metricas || {}).vol_anualizada)
+          ? `vol ${fmt.pct(c.metricas.vol_anualizada)}` : 'série curta')
     ]));
+
+    Object.entries((atual.alvos || {})).forEach(([tk, a]) => {
+      if (a.atingido) host.appendChild(h('div', { class: 'cart-band',
+        style: 'border-color:#34D399;color:#34D399' },
+        `❗ ${tk} atingiu o target price (R$ ${fmt.num(a.alvo, 2)} · preço ${fmt.num(a.preco, 2)}) — apenas aviso, nada foi executado.`));
+    });
 
     (atual.alertas || []).forEach((a) =>
       host.appendChild(h('div', { class: 'cart-band' }, '⚠ ' + a)));
@@ -469,8 +453,6 @@
       if (regras.micro) ul.appendChild(h('li', {}, [h('b', {}, 'Micro: '), regras.micro]));
       host.appendChild(ul);
     }
-
-    host.appendChild(h('div', { id: 'cart-research' }));
 
     const eventos = (c.eventos || []).slice().reverse();
     if (eventos.length) {
@@ -506,7 +488,6 @@
 
   el('brand').innerHTML = window.FL.brandHeader('Carteiras acompanhadas · cota, banda e benchmark');
   el('nav').innerHTML = window.FL.navTabs('carteiras');
-  el('btnLLM').addEventListener('click', () => window.FLSettings.open());
   el('btnAtualizarTodas').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
     btn.disabled = true;
@@ -527,10 +508,6 @@
       btn.textContent = '↻ Atualizar todas';
     }
   });
-
-  // O chat abre com o contexto da TELA DE AÇÕES: é dele que a mesa enxerga o
-  // universo inteiro e pode propor carteiras — o cartão de salvar funciona aqui.
-  window.FLChat.init({ tela: 'acoes', rotulo: 'peça uma carteira à mesa' });
 
   const id = idDaUrl();
   if (id) paginaDetalhe(id); else paginaLista();

@@ -243,3 +243,43 @@ def liquidity_band(avg_vol: Optional[float]) -> str:
     if avg_vol >= 100e3:
         return "baixa"
     return "muito baixa"
+
+
+# ---------------------------------------------------------------------------
+# Janelas de tempo do gráfico de preço
+# ---------------------------------------------------------------------------
+
+JANELAS_DIAS = {"1m": 31, "3m": 92, "6m": 183, "12m": 366}
+
+
+def recorta_janela(serie, janela: str, hoje=None) -> dict:
+    """Recorta a série de fechamentos na janela pedida.
+
+    Retorno = último ÷ primeiro − 1, mas SÓ quando a série realmente cobre a
+    janela (primeiro ponto até 20 dias depois do corte): série de 2 meses não
+    ganha rótulo de "12 meses" — o retorno sai None e o gráfico mostra o que há.
+    """
+    from datetime import date, timedelta
+
+    serie = sorted(serie or [])
+    if not serie:
+        return {"serie": [], "retorno": None}
+    ref = hoje or date.fromisoformat(str(serie[-1][0])[:10])
+    if janela == "max":
+        corte = None
+    elif janela == "ytd":
+        corte = date(ref.year, 1, 1)
+    else:
+        corte = ref - timedelta(days=JANELAS_DIAS.get(janela, 366))
+
+    recorte = serie if corte is None else [p for p in serie if p[0] >= corte.isoformat()]
+    if not recorte:
+        recorte = serie[-2:]
+    retorno = None
+    if len(recorte) >= 2 and recorte[0][1]:
+        # A janela está coberta quando o HISTÓRICO alcança o corte (com folga
+        # de 20 dias) — o retorno é medido do primeiro ponto dentro dela.
+        cobre = corte is None or date.fromisoformat(str(serie[0][0])[:10]) <= corte + timedelta(days=20)
+        if cobre:
+            retorno = recorte[-1][1] / recorte[0][1] - 1
+    return {"serie": recorte, "retorno": retorno}

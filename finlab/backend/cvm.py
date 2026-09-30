@@ -356,6 +356,11 @@ def ltm_series(cd_cvm: str) -> dict:
     if div_cp is not None or div_lp is not None:
         bruta = (div_cp or 0.0) + (div_lp or 0.0)
         campos["divida_liquida"] = bruta - ((caixa or 0.0) + (aplic or 0.0))
+        campos["divida_bruta"] = bruta
+        campos["divida_cp"] = div_cp
+        campos["divida_lp"] = div_lp
+    if caixa is not None or aplic is not None:
+        campos["caixa_total"] = (caixa or 0.0) + (aplic or 0.0)
 
     if not any(v is not None for v in campos.values()):
         return vazio
@@ -368,7 +373,8 @@ def ltm_series(cd_cvm: str) -> dict:
         "campos": campos,
         # Diz ao front quais colunas são saldo: elas não somam 12 meses, e
         # rotulá-las como se somassem seria mentir sobre o que o número é.
-        "saldos": ["patrimonio_liquido", "divida_liquida"],
+        "saldos": ["patrimonio_liquido", "divida_liquida", "divida_bruta",
+                   "divida_cp", "divida_lp", "caixa_total"],
     }
 
 
@@ -646,6 +652,7 @@ def annual_series(cd_cvm: str, max_years: int = MAX_YEARS) -> dict:
     div_cp = _series(bpp, ["2.01.04"], None)
     div_lp = _series(bpp, ["2.02.01"], None)
     divida_bruta = _sum_series(div_cp, div_lp) if (div_cp or div_lp) else {}
+    desp_fin = _series(dre, ["3.06.02"], ["DESPESAS FINANCEIRAS"])
 
     # --- Fluxo de caixa --------------------------------------------------
     fco = _series(dfc, ["6.01"], ["CAIXA LIQUIDO ATIVIDADES OPERACIONAIS"])
@@ -679,6 +686,9 @@ def annual_series(cd_cvm: str, max_years: int = MAX_YEARS) -> dict:
         "caixa_total": caixa_total,
         "divida_bruta": divida_bruta,
         "divida_liquida": divida_liq,
+        "divida_cp": div_cp,
+        "divida_lp": div_lp,
+        "despesas_financeiras": desp_fin,
         "fco": fco,
         "capex": {y: -abs(v) for y, v in capex.items()},
         "fcl": fcl,

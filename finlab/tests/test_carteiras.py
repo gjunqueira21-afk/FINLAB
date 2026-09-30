@@ -1,4 +1,4 @@
-"""Testes das carteiras acompanhadas e do arquivo de deep research.
+"""Testes das carteiras acompanhadas.
 
 Rodar: python -m pytest finlab/tests/test_carteiras.py -q
 
@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from finlab.backend import carteiras, deep, market  # noqa: E402
+from finlab.backend import carteiras, market  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,6 @@ from finlab.backend import carteiras, deep, market  # noqa: E402
 @pytest.fixture()
 def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(carteiras, "DIR_CARTEIRAS", tmp_path / "carteiras")
-    monkeypatch.setattr(deep, "DIR_DEEP", tmp_path / "deep empresas")
 
     estado = {"precos": {}, "bench": None}
 
@@ -36,7 +35,14 @@ def sandbox(tmp_path, monkeypatch):
         return {tk: estado["precos"].get(tk, []) for tk in tickers}
 
     def fake_asset_series(tickers):
-        return {carteiras.BENCHMARK: estado["bench"] or []}
+        out = {tk: estado["precos"].get(tk, []) for tk in tickers}
+        out[carteiras.BENCHMARK] = estado["bench"] or []
+        return out
+
+    # etfs.universe() fala com a rede; nos testes o cadastro é sintético.
+    monkeypatch.setattr(carteiras, "etfs", type("E", (), {
+        "get": staticmethod(lambda tk: {"ticker": tk} if tk == "BOVA11" else None)})(),
+        raising=False)
 
     monkeypatch.setattr(market, "price_series", fake_price_series)
     monkeypatch.setattr(market, "asset_series", fake_asset_series)
@@ -308,29 +314,6 @@ def test_remover_e_id_torto_nao_sai_da_pasta(sandbox):
 # Deep research arquivado
 # ---------------------------------------------------------------------------
 
-def test_deep_salva_lista_e_le(sandbox):
-    r1 = deep.salvar("WEGE3", "# Análise\nROIC alto.", titulo="Deep da mesa")
-    r2 = deep.salvar("wege3", "Segunda do dia.")
-    assert r1["arquivo"].startswith("WEGE3-") and r1["arquivo"].endswith(".md")
-    assert r2["arquivo"] != r1["arquivo"]           # sufixo -2 no mesmo dia
-    nomes = [x["arquivo"] for x in deep.listar()]
-    assert set(nomes) == {r1["arquivo"], r2["arquivo"]}
-    corpo = deep.ler(r1["arquivo"])
-    assert "ROIC alto" in corpo and "não é recomendação" in corpo
-
-
-def test_deep_recusa_vazio_e_path_traversal(sandbox):
-    with pytest.raises(ValueError):
-        deep.salvar("WEGE3", "   ")
-    with pytest.raises(ValueError):
-        deep.salvar("../..", "x")
-    assert deep.ler("../../../etc/passwd") is None
-
-
-# ---------------------------------------------------------------------------
-# Windows — o painel roda no PC do usuário, onde não existe fcntl
-# ---------------------------------------------------------------------------
-
 def test_lock_funciona_sem_fcntl_como_no_windows(sandbox, monkeypatch):
     chamadas = []
 
@@ -347,3 +330,60 @@ def test_lock_funciona_sem_fcntl_como_no_windows(sandbox, monkeypatch):
     assert carteiras.obter(c["id"])["nome"] == "Qualidade BR"
     assert chamadas and chamadas[0] == FakeMsvcrt.LK_LOCK
     assert chamadas.count(FakeMsvcrt.LK_LOCK) == chamadas.count(FakeMsvcrt.LK_UNLCK)
+
+
+# ---------------------------------------------------------------------------
+# V2: target price, universo ampliado, limite de carteiras
+# ---------------------------------------------------------------------------
+
+def test_target_price_marca_atingido(sandbox):
+    payload = dict(PAYLOAD, posicoes=[
+        {"ticker": "WEGE3", "peso": 0.6, "alvo": 50.0},
+        {"ticker": "PETR4", "peso": 0.4},          # sem alvo — não pode quebrar
+    ])
+    poe_precos(sandbox, {"WEGE3": 40.0, "PETR4": 30.0})
+    poe_bench(sandbox, 100.0)
+    c = carteiras.criar(payload)
+    assert c["atual"]["alvos"]["WEGE3"]["atingido"] is False
+    assert "PETR4" not in c["atual"]["alvos"]
+
+    poe_precos(sandbox, {"WEGE3": 52.0, "PETR4": 31.0})
+    c = carteiras.atualizar(c["id"])
+    assert c["atual"]["alvos"]["WEGE3"]["atingido"] is True
+    r = carteiras.listar()[0]
+    assert r["n_alvos"] == 1
+
+
+def test_alvo_invalido_e_recusado(sandbox):
+    poe_precos(sandbox, {"WEGE3": 40.0})
+    for ruim in ("abc", 0, -5):
+        with pytest.raises(carteiras.CarteiraInvalida):
+            carteiras.criar({"nome": "X", "posicoes": [
+                {"ticker": "WEGE3", "peso": 1.0, "alvo": ruim}]})
+
+
+def test_limite_de_dez_carteiras(sandbox):
+    poe_precos(sandbox, {"WEGE3": 40.0})
+    poe_bench(sandbox, 100.0)
+    for i in range(10):
+        carteiras.criar({"nome": f"C{i}", "posicoes": [{"ticker": "WEGE3", "peso": 1.0}]})
+    with pytest.raises(carteiras.CarteiraInvalida):
+        carteiras.criar({"nome": "C10", "posicoes": [{"ticker": "WEGE3", "peso": 1.0}]})
+
+
+def test_bdr_e_etf_entram_na_carteira(sandbox):
+    poe_precos(sandbox, {"WEGE3": 40.0, "AAPL34": 60.0, "BOVA11": 120.0})
+    poe_bench(sandbox, 100.0)
+    c = carteiras.criar({"nome": "Mista", "posicoes": [
+        {"ticker": "WEGE3", "peso": 0.4},
+        {"ticker": "AAPL34", "peso": 0.3},
+        {"ticker": "BOVA11", "peso": 0.3}]})
+    assert {p["ticker"] for p in c["posicoes"]} == {"WEGE3", "AAPL34", "BOVA11"}
+
+
+def test_detalhe_traz_janelas_e_sparkline(sandbox):
+    c = carteira_padrao(sandbox)
+    det = carteiras.detalhe(carteiras.obter(c["id"]))
+    assert "janelas" in det and "metricas" in det
+    r = carteiras.listar()[0]
+    assert isinstance(r["serie_curta"], list)

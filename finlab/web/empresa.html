@@ -3,71 +3,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FinLab · Valuation</title>
+<title>FinLab · Empresa</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='78' font-size='78'>🧠</text></svg>">
 <link rel="stylesheet" href="/assets/css/finlab.css">
 </head>
 <body>
 <div class="wrap">
-
   <header class="topbar">
     <div id="brand"></div>
+    <div id="nav"></div>
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
-      <div class="search-box" style="min-width:230px">
-        <span class="ico">🔎</span>
-        <input type="text" id="tickerSearch" placeholder="Trocar de empresa…" autocomplete="off" spellcheck="false">
-        <div id="tickerList"></div>
-      </div>
-      <a class="btn ghost" href="/">← Tela principal</a>
-      <button class="btn" id="btnLLM">⚙ A mesa de IA</button>
+      <span class="tag-pill" id="sourcePill">—</span>
+      <a class="btn ghost" href="/">← Screening</a>
     </div>
   </header>
 
-  <div id="companyStrip"></div>
   <div id="alertZone"></div>
+  <div id="companyStrip"></div>
+  <main id="content"></main>
 
-  <!-- O regime não tem mais painel próprio: virou o badge clicável do strip,
-       e o dossiê completo vive na aba "Contexto & calls". -->
-
-  <!-- Quanto vale, afinal (redesenho 3.2): a página NÃO calcula preço justo.
-       O football compara referências de mercado no mesmo eixo, e a linha
-       "Seu DCF" vem da planilha exportada, digitada de volta no cartão. -->
-  <section class="panel" id="valorPanel">
-    <div class="panel-h">
-      <div>
-        <div class="ptitle"><b>Quanto vale, afinal</b> · referências de mercado no mesmo eixo — o valuation é seu</div>
-        <div class="psub">a linha tracejada é o preço de tela · você simula na planilha e traz a faixa</div>
-      </div>
-    </div>
-    <div class="valgrid">
-      <div class="chartbox" id="chartField"></div>
-      <div class="dcfcard" id="dcfCard"></div>
-    </div>
-  </section>
-
-  <!-- Corpo de leitura (tear sheet): DRE anual, trimestres e pares. -->
-  <section class="panel" id="dreAnual"></section>
-  <section class="panel" id="dreTrimestral"></section>
-  <section class="panel" id="paresPanel"></section>
-
-  <div class="tabs" id="tabs">
-    <button class="tab on" data-tab="saude">Nota de saúde</button>
-    <button class="tab" data-tab="contexto">Contexto &amp; calls</button>
+  <div class="foot">
+    <b>Como ler esta página.</b> Fundamentos oficiais das DFPs/ITRs da CVM; múltiplos com a
+    fonte escolhida no seletor (BRAPI 12 meses ou CVM), sempre com o preço de agora.
+    A análise de endividamento usa os balanços da CVM nas ações; nos BDRs, as demonstrações
+    anuais do Yahoo Finance (em USD) — a etiqueta de fonte em cada número diz de onde ele
+    saiu. Dívida bruta é a soma de empréstimos e financiamentos de curto e longo prazo;
+    cobertura de juros é EBITDA ÷ |despesas financeiras|. <b>Isto não é recomendação de investimento.</b>
   </div>
-  <section data-panel="saude"></section>
-  <section class="panel" data-panel="contexto" hidden></section>
-
-  <div class="foot" id="foot"></div>
 </div>
-
 <script src="/assets/js/core.js"></script>
 <script src="/assets/js/charts.js"></script>
-<script src="/assets/js/engine.js"></script>
-<script src="/assets/js/settings.js"></script>
-<script src="/assets/js/chat.js"></script>
-<script src="/assets/js/calls.js"></script>
-<script src="/assets/js/tearsheet.js"></script>
 <script src="/assets/js/company.js"></script>
 </body>
 </html>
