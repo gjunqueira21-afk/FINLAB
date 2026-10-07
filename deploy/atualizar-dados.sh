@@ -11,6 +11,10 @@ docker compose exec -T finlab sh -c \
     'cd /app/valuation_cvm && python -m src.main --start-year 2016 --end-year $(date +%Y)'
 
 echo "-> limpando o cache do painel para os números novos aparecerem"
+# O cache vive em disco (volume) e sobrevive ao restart: sem limpar, os
+# fundamentos e os 12 meses seguiriam os velhos por até 24 h.
+docker compose exec -T finlab python -c \
+    'from finlab.backend import cache; print(cache.clear(), "arquivos de cache removidos")'
 docker compose restart finlab
 
 echo "-> pronto."

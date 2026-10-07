@@ -2,6 +2,7 @@
 
     python -m finlab.backend.tarefas atualizar-carteiras
     python -m finlab.backend.tarefas atualizar-carteiras --lamina
+    python -m finlab.backend.tarefas conferir-trimestres [TICKER ...]
 
 Só o que roda SEM chave de API entra aqui: as chaves dos provedores de LLM
 vivem no navegador do usuário e nunca ficam no servidor, então o cron
@@ -65,9 +66,18 @@ def main() -> None:
                    help="Também regrava a lâmina .md de cada carteira em "
                         "data/carteiras/laminas/.")
 
+    c = sub.add_parser("conferir-trimestres",
+                       help="Confere ITR, 12 meses e Dív.Líq/EBITDA de todas as ações.")
+    c.add_argument("tickers", nargs="*", help="Só estes tickers (padrão: todos).")
+
     args = parser.parse_args()
     if args.tarefa == "atualizar-carteiras":
         sys.exit(_atualizar_carteiras(args.lamina))
+    if args.tarefa == "conferir-trimestres":
+        from . import conferencia
+        linhas = conferencia.conferir(tickers=[t.upper() for t in args.tickers] or None)
+        print(conferencia.relatorio(linhas))
+        sys.exit(0)
 
 
 if __name__ == "__main__":

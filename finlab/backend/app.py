@@ -98,7 +98,12 @@ def _ltm(cd_cvm: Optional[str]) -> dict:
     a tela principal pede os 90 de uma vez, e o ITR só muda com o pipeline."""
     if not cd_cvm:
         return {}
-    return cache.memoize(f"ltm:v3:{cd_cvm}", TTL_CVM, lambda: cvm.ltm_series(cd_cvm)) or {}
+    # v4: todas as contas na janela do último trimestre, saldo mais novo entre
+    # ITR e DFP e a despesa financeira (cobertura de juros em 12 meses).
+    # Vazio (ITR ainda não processado) não vai para o cache: senão o painel
+    # passaria 24 h sem os 12 meses mesmo depois do atualizar-dados.sh.
+    return cache.memoize(f"ltm:v4:{cd_cvm}", TTL_CVM,
+                         lambda: cvm.ltm_series(cd_cvm) or None) or {}
 
 
 def _overview_rows() -> dict:
@@ -378,8 +383,9 @@ def api_company(ticker: str):
         "consenso": _consenso(brapi),
         "itr": cvm.latest_quarter(comp.cd_cvm),
         "ltm": ltm,
-        "dre": {"anual": cvm.dre_anual(comp.cd_cvm),
-                "trimestral": cvm.dre_trimestral(comp.cd_cvm)},
+        # A DRE inteira numa grade: exercícios, trimestres de cada um (a tela
+        # abre o ano clicado), o ano em curso e os últimos 12 meses.
+        "dre": {"completa": cvm.dre_completa(comp.cd_cvm)},
         "source": snap.get("price_source"),
     }
 
@@ -408,8 +414,21 @@ def api_company_divida(ticker: str):
                     "capital regulatório, não por dívida líquida/EBITDA."]}
 
     eh_bdr = comp is None
-    anos = fund.get("years") or []
-    calc = divida.indicadores(anos, fund.get("series") or {})
+    anos = list(fund.get("years") or [])
+    series = {k: list(v) for k, v in (fund.get("series") or {}).items()}
+    ltm = _ltm(comp.cd_cvm) if comp is not None else {}
+    campos = (ltm or {}).get("campos") or {}
+    # O balanço do último trimestre entra como mais um ponto da série, depois
+    # dos exercícios: sem ele, o gráfico e os indicadores param no ano
+    # fechado e a alavancagem de hoje fica escondida atrás da de dezembro.
+    # Fluxos (EBITDA, despesa financeira) desse ponto são os 12 meses.
+    if (campos.get("divida_liquida") is not None and anos and ltm.get("exercicio")
+            and ltm["exercicio"] > int(anos[-1])):
+        anos.append(ltm.get("trimestre") or ltm.get("rotulo"))
+        for k in set(series) | {"divida_bruta", "divida_liquida", "caixa_total",
+                                "divida_cp", "divida_lp", "ebitda", "despesas_financeiras"}:
+            series.setdefault(k, [None] * (len(anos) - 1)).append(campos.get(k))
+    calc = divida.indicadores(anos, series)
 
     avisos = []
     if not anos:
@@ -418,10 +437,9 @@ def api_company_divida(ticker: str):
                       "Sem demonstrações processadas da CVM para este ticker — "
                       "rode o pipeline em valuation_cvm.")
 
-    # Retrato mais recente: saldo do último ITR quando existir, senão o da DFP.
+    # Retrato mais recente: saldo do último ITR (ou da DFP, se for mais nova)
+    # sobre o EBITDA dos últimos 12 meses.
     atual = {}
-    ltm = _ltm(comp.cd_cvm) if comp is not None else {}
-    campos = (ltm or {}).get("campos") or {}
     if campos.get("divida_liquida") is not None:
         nd = None
         if campos.get("ebitda"):
@@ -430,7 +448,8 @@ def api_company_divida(ticker: str):
                  "divida_bruta": campos.get("divida_bruta"),
                  "caixa_total": campos.get("caixa_total"),
                  "nd_ebitda": nd,
-                 "fonte": "CVM · ITR", "rotulo": (ltm or {}).get("rotulo")}
+                 "fonte": "CVM · ITR", "rotulo": (ltm or {}).get("rotulo"),
+                 "saldo_em": ltm.get("saldo_em")}
     elif anos:
         i = len(anos) - 1
         atual = {"divida_liquida": calc["series"]["divida_liquida"][i],
