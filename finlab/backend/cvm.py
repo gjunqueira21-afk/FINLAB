@@ -273,85 +273,161 @@ def _ltm(isolado: dict) -> dict:
     return out
 
 
-def ltm_series(cd_cvm: str) -> dict:
-    """O ano corrente parcial: 12 meses móveis até o último ITR publicado.
+def _ts(serie: dict) -> dict:
+    """Chaves de data como Timestamp. A coluna do parquet pode vir como texto,
+    e aí o `.get()` com Timestamp devolveria None para tudo — a falha
+    silenciosa que esvazia uma tabela inteira sem erro nenhum."""
+    return {pd.Timestamp(k): v for k, v in (serie or {}).items()}
 
-    A tabela de demonstrações mostrava só exercícios fechados, então o ano em
-    curso simplesmente não existia nela — e é justamente o período que o
-    usuário está tentando entender.
+
+# Contas trimestrais além das linhas da DRE de leitura.
+CONTA_DESP_FIN = (["3.06.02"], ["DESPESAS FINANCEIRAS"])
+CONTA_FCO = (["6.01"], ["CAIXA LIQUIDO ATIVIDADES OPERACIONAIS"])
+
+
+def _trimestres(cd_cvm: str) -> dict:
+    """Todos os trimestres isolados do ITR, conta a conta, com o 4T derivado.
+
+    Devolve {"isolado": {chave: {Timestamp fim: valor}}, "abertura": {fim:
+    início do exercício}, "fin": bool}. É a fonte única do trimestral: a DRE
+    da página, os 12 meses dos múltiplos e o endividamento leem daqui, para
+    os três nunca discordarem sobre o que foi o 2T.
+
+    Fluxos vêm ACUMULADOS no exercício no ITR e são desfeitos por diferença;
+    o 4T (que o ITR não publica) é a DFP do ano menos o acumulado até o 3T.
+    D&A e EBITDA saem da DFC, como no anual.
+    """
+    vazio = {"isolado": {}, "abertura": {}, "fin": False}
+    if not cd_cvm:
+        return vazio
+    dre = _company("dre", cd_cvm, "itr")
+    if dre.empty or "DT_FIM_EXERC" not in dre.columns:
+        return vazio
+    dre = _acumulado_do_exercicio(dre)
+    if dre.empty or "DT_INI_EXERC" not in dre.columns:
+        return vazio
+    abertura = {pd.Timestamp(f): pd.Timestamp(i) for f, i in
+                (dre.drop_duplicates("DT_FIM_EXERC")
+                    .set_index("DT_FIM_EXERC")["DT_INI_EXERC"].to_dict().items())}
+    if not abertura:
+        return vazio
+
+    fin = is_financial_statement(cd_cvm)
+    dre_anual = _company("dre", cd_cvm)
+    contas = {chave: conta for chave, _r, _t, conta in _LINHAS_DRE if conta is not None}
+    contas["despesas_financeiras"] = CONTA_DESP_FIN
+
+    isolado: dict = {}
+    for chave, conta in contas.items():
+        acc = _ts(_series(dre, *conta, chave="DT_FIM_EXERC"))
+        anual = _series(dre_anual, *conta) if not dre_anual.empty else {}
+        isolado[chave] = _desacumula(acc, abertura, anual)
+
+    dfc = _company("dfc_mi", cd_cvm, "itr")
+    dfc = _acumulado_do_exercicio(dfc) if not dfc.empty else dfc
+    dfc_anual = _company("dfc_mi", cd_cvm)
+    deprec: dict = {}
+    if not dfc.empty:
+        def desacumula_dfc(acc: dict, anual: dict) -> dict:
+            return _desacumula(_ts(acc), abertura, anual)
+        deprec = desacumula_dfc(
+            {d: abs(v) for d, v in _depreciation(dfc, chave="DT_FIM_EXERC").items()},
+            {a: abs(v) for a, v in _depreciation(dfc_anual).items()} if not dfc_anual.empty else {})
+        isolado["fco"] = desacumula_dfc(
+            _series(dfc, *CONTA_FCO, chave="DT_FIM_EXERC"),
+            _series(dfc_anual, *CONTA_FCO) if not dfc_anual.empty else {})
+        isolado["capex"] = desacumula_dfc(
+            _capex(dfc, "DT_FIM_EXERC"), _capex(dfc_anual) if not dfc_anual.empty else {})
+    isolado["da"] = {d: -v for d, v in deprec.items()}
+    ebit = isolado.get("ebit") or {}
+    isolado["ebitda"] = ({d: ebit[d] + deprec[d] for d in ebit if d in deprec}
+                        if not fin else {})
+    return {"isolado": isolado, "abertura": abertura, "fin": fin}
+
+
+def _exercicio_de(fim: pd.Timestamp, abertura: dict) -> int:
+    """O exercício a que o trimestre pertence: o ano em que ele FECHA. Para o
+    ano civil é o ano da data; num exercício jul–jun, o 1T (set) é do ano
+    seguinte. O 4T derivado não tem abertura: a própria data é o fecho."""
+    ini = abertura.get(fim)
+    if ini is None:
+        return pd.Timestamp(fim).year
+    return (ini + pd.DateOffset(years=1) - pd.Timedelta(days=1)).year
+
+
+def _numero_do_trimestre(fim: pd.Timestamp, abertura: dict) -> int:
+    ini = abertura.get(fim)
+    if ini is None:                       # 4T derivado: fecha o exercício
+        return 4
+    return _indice_do_trimestre(ini, pd.Timestamp(fim))
+
+
+def _saldo_mais_recente(cd_cvm: str, st: str, codes, keywords) -> tuple:
+    """(data, valor) do balanço mais recente, ITR ou DFP — o que for mais novo.
+
+    Depois que a DFP do ano sai e antes do 1T seguinte, o último ITR (set)
+    está três meses atrás do balanço anual (dez): pegar só o ITR seria
+    defasar a dívida justamente quando o dado novo já existe.
+    """
+    candidatos: dict = {}
+    for tipo in ("itr", "dfp"):
+        frame = _company(st, cd_cvm, tipo)
+        if frame.empty or "DT_FIM_EXERC" not in frame.columns:
+            continue
+        candidatos.update(_ts(_series(frame, codes, keywords, chave="DT_FIM_EXERC")))
+    if not candidatos:
+        return None, None
+    data = max(candidatos)
+    return data, candidatos[data]
+
+
+def ltm_series(cd_cvm: str) -> dict:
+    """Os últimos 12 meses até o trimestre mais recente publicado.
 
     Duas naturezas de conta, tratadas de formas diferentes de propósito:
 
-      * **Fluxo** (receita, EBITDA, EBIT, lucro, caixa das operações, capex):
-        soma dos quatro trimestres isolados. Somar acumulados daria o dobro.
-      * **Estoque** (dívida líquida, patrimônio líquido): é saldo, não fluxo.
-        Vale o do balanço mais recente — somar quatro seria absurdo.
+      * **Fluxo** (receita, EBITDA, EBIT, lucro, despesa financeira, caixa
+        das operações, capex): soma dos quatro trimestres isolados que
+        terminam no ÚLTIMO trimestre. Todas as contas na mesma janela: uma
+        conta sem o trimestre mais recente fica vazia, em vez de vir de uma
+        janela mais velha com o rótulo da nova (o "LTM 2T26" que na verdade
+        era 1T26 só para o EBITDA).
+      * **Estoque** (dívida, caixa, patrimônio): o balanço mais recente, ITR
+        ou DFP. Somar quatro saldos seria absurdo.
 
     Devolve {} quando o ITR não está processado ou não fecha 12 meses.
     """
     vazio: dict = {}
     if not cd_cvm:
         return vazio
-
-    dre = _acumulado_do_exercicio(_company("dre", cd_cvm, "itr"))
-    if dre.empty or "DT_INI_EXERC" not in dre.columns:
+    tri = _trimestres(cd_cvm)
+    iso, abertura = tri["isolado"], tri["abertura"]
+    datas = sorted({d for chave in ("receita", "lucro_liquido")
+                    for d in (iso.get(chave) or {})})
+    if not datas:
         return vazio
-    abertura = (dre.drop_duplicates("DT_FIM_EXERC")
-                   .set_index("DT_FIM_EXERC")["DT_INI_EXERC"].to_dict())
-    if not abertura:
-        return vazio
+    ultimo = datas[-1]
 
-    dfc = _acumulado_do_exercicio(_company("dfc_mi", cd_cvm, "itr"))
-    dre_anual = _company("dre", cd_cvm)
-    dfc_anual = _company("dfc_mi", cd_cvm)
-
-    def ltm_de(acumulado: dict, anual: dict) -> Optional[float]:
-        if not acumulado:
-            return None
-        isolado = _desacumula(acumulado, abertura, anual or {})
-        janela = _ltm(isolado)
-        return janela.get(max(janela)) if janela else None
-
-    # --- fluxos da DRE ----------------------------------------------------
     campos: dict = {}
-    for nome, conta in (("receita", CONTA_RECEITA), ("lucro_liquido", CONTA_LUCRO),
-                        ("ebit", (["3.05"], ["RESULTADO ANTES DO RESULTADO FINANCEIRO",
-                                             "RESULTADO OPERACIONAL"]))):
-        campos[nome] = ltm_de(_series(dre, *conta, chave="DT_FIM_EXERC"),
-                              _series(dre_anual, *conta) if not dre_anual.empty else {})
+    for chave in ("receita", "lucro_liquido", "ebit", "ebitda", "despesas_financeiras",
+                  "fco", "capex"):
+        janela = _ltm(iso.get(chave) or {})
+        campos[chave] = janela.get(ultimo)
+    deprec = _ltm({d: -v for d, v in (iso.get("da") or {}).items()}).get(ultimo)
+    campos["depreciacao"] = abs(deprec) if deprec is not None else None
+    if campos.get("capex") is not None:
+        campos["capex"] = -abs(campos["capex"])
+    campos["fcl"] = (campos["fco"] - abs(campos["capex"])
+                     if campos.get("fco") is not None and campos.get("capex") is not None
+                     else None)
 
-    # --- fluxos do DFC ----------------------------------------------------
-    if not dfc.empty:
-        fco = ltm_de(_series(dfc, ["6.01"], ["CAIXA LIQUIDO ATIVIDADES OPERACIONAIS"],
-                             chave="DT_FIM_EXERC"),
-                     _series(dfc_anual, ["6.01"], ["CAIXA LIQUIDO ATIVIDADES OPERACIONAIS"])
-                     if not dfc_anual.empty else {})
-        capex = ltm_de(_capex(dfc, "DT_FIM_EXERC"),
-                       _capex(dfc_anual) if not dfc_anual.empty else {})
-        deprec = ltm_de(_depreciation(dfc, "DT_FIM_EXERC"),
-                        _depreciation(dfc_anual) if not dfc_anual.empty else {})
-        campos["fco"] = fco
-        campos["capex"] = -abs(capex) if capex is not None else None
-        campos["depreciacao"] = abs(deprec) if deprec is not None else None
-        campos["fcl"] = (fco - abs(capex)) if (fco is not None and capex is not None) else None
-        if campos.get("ebit") is not None and deprec is not None:
-            campos["ebitda"] = campos["ebit"] + abs(deprec)
-
-    # --- estoques do balanço ---------------------------------------------
-    bpa = _company("bpa", cd_cvm, "itr")
-    bpp = _company("bpp", cd_cvm, "itr")
-
-    def saldo(frame, codes, keywords) -> Optional[float]:
-        if frame.empty:
-            return None
-        serie = _series(frame, codes, keywords, chave="DT_FIM_EXERC")
-        return serie.get(max(serie)) if serie else None
-
-    pl = saldo(bpp, None, ["PATRIMONIO LIQUIDO CONSOLIDADO", "PATRIMONIO LIQUIDO"])
-    caixa = saldo(bpa, ["1.01.01"], ["CAIXA E EQUIVALENTES"])
-    aplic = saldo(bpa, ["1.01.02"], ["APLICACOES FINANCEIRAS", "TITULOS E VALORES MOBILIARIOS"])
-    div_cp = saldo(bpp, ["2.01.04"], None)
-    div_lp = saldo(bpp, ["2.02.01"], None)
+    _, pl = _saldo_mais_recente(cd_cvm, "bpp", None,
+                                ["PATRIMONIO LIQUIDO CONSOLIDADO", "PATRIMONIO LIQUIDO"])
+    _, caixa = _saldo_mais_recente(cd_cvm, "bpa", ["1.01.01"], ["CAIXA E EQUIVALENTES"])
+    _, aplic = _saldo_mais_recente(cd_cvm, "bpa", ["1.01.02"],
+                                   ["APLICACOES FINANCEIRAS", "TITULOS E VALORES MOBILIARIOS"])
+    data_div, div_cp = _saldo_mais_recente(cd_cvm, "bpp", ["2.01.04"], None)
+    _, div_lp = _saldo_mais_recente(cd_cvm, "bpp", ["2.02.01"], None)
     campos["patrimonio_liquido"] = pl
     if div_cp is not None or div_lp is not None:
         bruta = (div_cp or 0.0) + (div_lp or 0.0)
@@ -365,11 +441,14 @@ def ltm_series(cd_cvm: str) -> dict:
     if not any(v is not None for v in campos.values()):
         return vazio
 
-    fim = max(abertura)
+    n = _numero_do_trimestre(ultimo, abertura)
+    ano = _exercicio_de(ultimo, abertura)
     return {
-        "fim": str(pd.Timestamp(fim).date()),
-        "rotulo": f"LTM {_indice_do_trimestre(pd.Timestamp(abertura[fim]), pd.Timestamp(fim))}"
-                  f"T{str(pd.Timestamp(fim).year)[-2:]}",
+        "fim": str(pd.Timestamp(ultimo).date()),
+        "rotulo": f"LTM {n}T{str(ano)[-2:]}",
+        "trimestre": f"{n}T{str(ano)[-2:]}",
+        "exercicio": ano,
+        "saldo_em": str(pd.Timestamp(data_div).date()) if data_div is not None else None,
         "campos": campos,
         # Diz ao front quais colunas são saldo: elas não somam 12 meses, e
         # rotulá-las como se somassem seria mentir sobre o que o número é.
@@ -1060,6 +1139,111 @@ def dre_trimestral(cd_cvm: str) -> dict:
         linha["yoy"] = yoy
 
     return {"colunas": colunas, "linhas": linhas, "financial": fin, "ano": ano}
+
+
+# Linhas que somam no tempo (o resto são margens, calculadas por coluna).
+_SOMAVEIS = {"receita", "cpv", "lucro_bruto", "despesas", "ebitda", "da", "ebit",
+             "resultado_financeiro", "ir", "lucro_liquido"}
+
+
+def dre_completa(cd_cvm: str, max_anos: int = 6) -> dict:
+    """A DRE de leitura inteira: exercícios fechados, os trimestres de cada um,
+    o ano em curso e os últimos 12 meses — numa grade só de colunas.
+
+    Colunas, em ordem, cada uma com `tipo`:
+      * ``tri``  — trimestre isolado (1T25…), ANTES do seu exercício; a tela
+        os mostra quando o usuário abre o ano. `derivado` marca o 4T, que é
+        DFP − 9M (o ITR não publica o 4T).
+      * ``ano``  — exercício fechado (DFP).
+      * ``ytd``  — o ano em curso, acumulado (1S26, 9M26), só quando há mais
+        de um trimestre e todos eles; com um só, a coluna seria o próprio 1T.
+      * ``ltm``  — soma dos 4 últimos trimestres, quando o último trimestre é
+        posterior ao último exercício fechado (senão ela repetiria o ano).
+
+    `grupo` liga cada trimestre ao exercício dele. Sem ITR, sai só o anual,
+    como antes.
+    """
+    vazio = {"colunas": [], "linhas": [], "financial": False, "cagr_span": 0}
+    if not cd_cvm:
+        return vazio
+    dre_a = _company("dre", cd_cvm)
+    fin = is_financial_statement(cd_cvm)
+    anual = (_series_dre_anual(dre_a, _company("dfc_mi", cd_cvm), fin)
+             if not dre_a.empty else {})
+    anos = sorted({a for serie in anual.values() for a in serie})[-max_anos:]
+
+    tri = _trimestres(cd_cvm)
+    iso, abertura = tri["isolado"], tri["abertura"]
+    por_exercicio: dict = {}
+    for d in sorted({d for serie in iso.values() for d in serie}):
+        por_exercicio.setdefault(_exercicio_de(d, abertura), []).append(d)
+
+    ultimo_ano = anos[-1] if anos else None
+    parciais = [a for a in sorted(por_exercicio)
+                if ultimo_ano is None or a > ultimo_ano]
+    if not anos and not parciais:
+        return vazio
+
+    colunas: list = []
+    valores: list = []            # um {chave: valor} por coluna
+
+    def tri_cols(exercicio: int) -> list:
+        idx = []
+        for d in por_exercicio.get(exercicio, []):
+            n = _numero_do_trimestre(d, abertura)
+            colunas.append({"tipo": "tri", "rotulo": f"{n}T{str(exercicio)[-2:]}",
+                            "grupo": exercicio, "fim": str(pd.Timestamp(d).date()),
+                            "derivado": d not in abertura})
+            valores.append({k: serie.get(d) for k, serie in iso.items()})
+            idx.append(len(colunas) - 1)
+        return idx
+
+    for a in anos:
+        tris = tri_cols(a)
+        colunas.append({"tipo": "ano", "rotulo": str(a), "grupo": a, "n_tri": len(tris)})
+        valores.append({k: serie.get(a) for k, serie in anual.items()})
+
+    for a in parciais:
+        tris = tri_cols(a)
+        if len(tris) < 2:
+            continue
+        n = _numero_do_trimestre(pd.Timestamp(colunas[tris[-1]]["fim"]), abertura)
+        # Acumulado só com o ano completo até ali: faltando um trimestre, a
+        # soma seria menor que a real e passaria por número certo.
+        if [_numero_do_trimestre(pd.Timestamp(colunas[i]["fim"]), abertura)
+                for i in tris] != list(range(1, n + 1)):
+            continue
+        rot = {2: "1S", 3: "9M", 4: "12M"}.get(n, f"{n}T")
+        colunas.append({"tipo": "ytd", "rotulo": f"{rot}{str(a)[-2:]}", "grupo": a,
+                        "n_tri": len(tris)})
+        valores.append({k: (sum(valores[i].get(k) for i in tris)
+                            if all(valores[i].get(k) is not None for i in tris) else None)
+                        for k in iso if k in _SOMAVEIS})
+
+    # 12 meses: só quando há trimestre depois do último exercício fechado.
+    datas = sorted(d for a in parciais for d in por_exercicio.get(a, []))
+    if datas:
+        ultimo = datas[-1]
+        n = _numero_do_trimestre(ultimo, abertura)
+        ex = _exercicio_de(ultimo, abertura)
+        ltm = {k: _ltm(iso.get(k) or {}).get(ultimo) for k in iso if k in _SOMAVEIS}
+        if any(v is not None for v in ltm.values()):
+            colunas.append({"tipo": "ltm", "rotulo": f"12m · {n}T{str(ex)[-2:]}",
+                            "grupo": None, "fim": str(pd.Timestamp(ultimo).date())})
+            valores.append(ltm)
+
+    periodos = list(range(len(colunas)))
+    chaves = {k for v in valores for k in v}
+    series_col = {k: {i: valores[i].get(k) for i in periodos} for k in chaves}
+    linhas = _monta_dre(series_col, periodos, fin)
+    i_anos = [i for i, c in enumerate(colunas) if c["tipo"] == "ano"]
+    for linha in linhas:
+        if linha["tipo"] in ("valor", "total", "hero") and len(i_anos) > 1:
+            linha["cagr"] = _cagr([linha["valores"][i] for i in i_anos], len(i_anos) - 1)
+        else:
+            linha["cagr"] = None
+    return {"colunas": colunas, "linhas": linhas, "financial": fin,
+            "cagr_span": max(len(i_anos) - 1, 0)}
 
 
 def shares_outstanding(cnpj: Optional[str]) -> Optional[float]:

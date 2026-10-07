@@ -93,8 +93,12 @@
     return h('div', { class: 'co-mults' }, Object.keys(labels).map((k) => {
       const v = mult[k];
       const txt = fmts[k] === 'num' ? fmt.num(v, 2) : fmt.byType(v, fmts[k]);
-      return h('div', { class: 'co-mult', title: janelaMultiplo(mult, k) || 'sem o dado nesta fonte' }, [
-        h('span', { class: 'l' }, labels[k]), h('span', { class: 'v' }, txt)
+      const jan = janelaMultiplo(mult, k);
+      return h('div', { class: 'co-mult', title: jan || 'sem o dado nesta fonte' }, [
+        h('span', { class: 'l' }, labels[k]), h('span', { class: 'v' }, txt),
+        // A janela à vista, não só no tooltip: Dív.Líq/EBITDA de dezembro e
+        // de junho são números diferentes, e o leitor precisa saber qual vê.
+        h('span', { class: 'j' }, jan ? jan.replace(' · CVM (ITR)', ' · CVM').replace(' · CVM (DFP)', ' · CVM') : '')
       ]);
     }));
   }
@@ -128,17 +132,91 @@
       h('span', {}, [h('i', { style: 'background:' + cor }), nome])));
   }
 
+  /* DRE em grade: exercícios fechados (DFP), os trimestres de cada um (ITR,
+     escondidos até o usuário abrir o ano), o ano em curso e os 12 meses.
+     O ano em curso nasce aberto — é ele que a tabela anual escondia. */
+  const dreAbertos = new Set();
+  let dreIniciada = false;
+
   function dreTable(dre) {
-    if (!dre || !(dre.anos || []).length) return null;
-    const head = h('tr', {}, [h('th', { class: 'left' }, 'DRE · ' + fmt.unit)]
-      .concat(dre.anos.map((a) => h('th', {}, String(a))),
-        [h('th', { title: `CAGR de ${dre.cagr_span} anos` }, 'CAGR')]));
-    const body = h('tbody', {}, dre.linhas.map((l) =>
-      h('tr', { class: 'dre-' + l.tipo }, [h('td', { class: 'left' }, l.rotulo)]
-        .concat(l.valores.map((v) => h('td', { class: 'num' },
-          l.tipo === 'margem' ? fmt.pct(v) : fmt.bigShort(v, 1))),
-          [h('td', { class: 'num mut' }, isNum(l.cagr) ? fmt.pctSigned(l.cagr) : '')]))));
-    return h('div', { class: 'table-wrap' }, h('table', {}, [h('thead', {}, head), body]));
+    if (!dre || !(dre.colunas || []).length) return null;
+    const cols = dre.colunas;
+    // grupo (exercício) → tem coluna-mãe que abre/fecha?
+    const mae = {};
+    cols.forEach((c) => { if (c.tipo === 'ano' || c.tipo === 'ytd') mae[c.grupo] = c; });
+    const temTri = {};
+    cols.forEach((c) => { if (c.tipo === 'tri') temTri[c.grupo] = true; });
+    if (!dreIniciada) {
+      cols.forEach((c) => { if (c.tipo === 'ytd') dreAbertos.add(c.grupo); });
+      dreIniciada = true;
+    }
+    const visivel = (c) => c.tipo !== 'tri' || !mae[c.grupo] || dreAbertos.has(c.grupo);
+
+    const box = h('div', { class: 'table-wrap dre-grade' });
+    function desenha() {
+      box.innerHTML = '';
+      const idx = cols.map((c, i) => i).filter((i) => visivel(cols[i]));
+      const th = (c) => {
+        if (c.tipo === 'tri') {
+          return h('th', { class: 'dre-tri' + (c.derivado ? ' dre-deriv' : ''),
+            title: c.derivado ? `${c.rotulo}: exercício (DFP) menos os 9 meses do ITR — a CVM não publica o 4T isolado`
+              : `${c.rotulo}: trimestre isolado, desacumulado do ITR` }, c.rotulo);
+        }
+        if (c.tipo === 'ltm') {
+          return h('th', { class: 'dre-ltm',
+            title: 'Últimos 12 meses: soma dos 4 trimestres mais recentes (anualizado)' }, c.rotulo);
+        }
+        const rot = c.tipo === 'ytd' ? c.rotulo : String(c.rotulo);
+        if (!temTri[c.grupo]) {
+          return h('th', { title: c.tipo === 'ytd' ? 'acumulado do ano em curso' : 'exercício fechado (DFP)' }, rot);
+        }
+        const aberto = dreAbertos.has(c.grupo);
+        return h('th', { class: 'dre-ano' + (c.tipo === 'ytd' ? ' dre-ytd' : '') },
+          h('button', {
+            type: 'button', class: 'dre-abre' + (aberto ? ' on' : ''),
+            'aria-expanded': aberto ? 'true' : 'false',
+            title: (aberto ? 'fechar' : 'abrir') + ` os trimestres de ${c.grupo}`,
+            onclick: () => {
+              if (aberto) dreAbertos.delete(c.grupo); else dreAbertos.add(c.grupo);
+              desenha();
+            }
+          }, [rot, h('span', { class: 'seta' }, aberto ? '▾' : '▸')]));
+      };
+      const cls = (c) => c.tipo === 'tri' ? 'num dre-tri' : c.tipo === 'ltm' ? 'num dre-ltm' : 'num';
+      const head = h('tr', {}, [h('th', { class: 'left' }, 'DRE · ' + fmt.unit)]
+        .concat(idx.map((i) => th(cols[i])),
+          [h('th', { title: `CAGR dos exercícios (${dre.cagr_span} anos)` }, 'CAGR')]));
+      const body = h('tbody', {}, dre.linhas.map((l) =>
+        h('tr', { class: 'dre-' + l.tipo }, [h('td', { class: 'left' }, l.rotulo)]
+          .concat(idx.map((i) => h('td', { class: cls(cols[i]) },
+            l.tipo === 'margem' ? fmt.pct(l.valores[i]) : fmt.bigShort(l.valores[i], 1))),
+            [h('td', { class: 'num mut' }, isNum(l.cagr) ? fmt.pctSigned(l.cagr) : '')]))));
+      box.appendChild(h('table', {}, [h('thead', {}, head), body]));
+    }
+    desenha();
+    return h('div', {}, [
+      box,
+      h('div', { class: 'psub dre-nota' },
+        'Clique num ano para abrir os trimestres. Trimestres desacumulados do ITR; o 4T é o exercício menos os 9 meses. '
+        + '"12m" soma os 4 trimestres mais recentes — é a base dos múltiplos em 12 meses.')
+    ]);
+  }
+
+  /** Série anual + o ponto dos 12 meses, quando ele é mais novo que o último
+   *  exercício: sem ele os gráficos param em dezembro e escondem o ano. */
+  function comDozeMeses(f, ltm) {
+    const anos = (f.years || []).slice();
+    const series = {};
+    Object.keys(f.series || {}).forEach((k) => { series[k] = (f.series[k] || []).slice(); });
+    const ultimo = anos.length ? Number(anos[anos.length - 1]) : null;
+    if (ltm && ltm.campos && ltm.exercicio && (ultimo === null || ltm.exercicio > ultimo)) {
+      anos.push('12m ' + (ltm.trimestre || ''));
+      Object.keys(series).forEach((k) => {
+        const v = ltm.campos[k];
+        series[k].push(isNum(v) ? v : null);
+      });
+    }
+    return { years: anos, series };
   }
 
   function renderFundamentos(host, d) {
@@ -149,7 +227,9 @@
       grid.innerHTML = ''; grid.appendChild(multGrid(d));
     });
     const p = panel('Fundamentos atuais',
-      d.ltm && d.ltm.rotulo ? `ITR mais recente: ${d.ltm.rotulo}` : null, [
+      [f.last_year ? `último exercício: ${f.last_year}` : null,
+       d.ltm && d.ltm.trimestre ? `último trimestre: ${d.ltm.trimestre} (múltiplos CVM em 12 meses até ele)` : null]
+        .filter(Boolean).join(' · ') || null, [
         h('div', { class: 'co-toolbar' }, [sel]),
         grid,
         h('div', { class: 'co-charts' }, [
@@ -158,20 +238,21 @@
           h('div', {}, [legenda([['#A78BFA', 'Mg. EBITDA'], ['#34D399', 'Mg. líquida'], ['#F5B841', 'ROE']]),
             h('div', { id: 'chMargens', class: 'chartbox' })])
         ]),
-        dreTable((d.dre || {}).anual)
+        dreTable((d.dre || {}).completa || (d.dre || {}).anual)
       ]);
     host.appendChild(p);
+    const fc = comDozeMeses(f, d.ltm);
     setTimeout(() => {
-      anosChart(el('chResultado'), f, [
+      anosChart(el('chResultado'), fc, [
         { key: 'receita', label: 'Receita', color: '#67E8F9' },
         { key: 'ebitda', label: 'EBITDA', color: '#A78BFA' },
         { key: 'lucro_liquido', label: 'Lucro', color: '#34D399' }]);
-      const s = f.series || {};
-      const razao = (num, den) => (f.years || []).map((a, i) => {
+      const s = fc.series || {};
+      const razao = (num, den) => (fc.years || []).map((a, i) => {
         const n = (s[num] || [])[i], dd = (s[den] || [])[i];
         return isNum(n) && isNum(dd) && dd ? n / dd : null;
       });
-      const ind = { years: f.years, series: {
+      const ind = { years: fc.years, series: {
         mg_ebitda: razao('ebitda', 'receita'),
         mg_liquida: razao('lucro_liquido', 'receita'),
         roe: razao('lucro_liquido', 'patrimonio_liquido') } };

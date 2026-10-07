@@ -43,6 +43,7 @@ Quando aparecer `FinLab no ar`, acesse `https://seu-dominio` e faça login.
 |---|---|
 | Atualizar o código (depois de um PR aceito) | `bash atualizar.sh` |
 | Atualizar as demonstrações da CVM | `bash atualizar-dados.sh` |
+| Conferir trimestres e 12 meses das 90 ações | `docker compose exec finlab python -m finlab.backend.tarefas conferir-trimestres` |
 | Atualizar as carteiras acompanhadas (cota, alertas, lâminas) | `bash atualizar-carteiras.sh` |
 | Ver os logs | `docker compose logs -f finlab` |
 | Parar / subir | `docker compose down` / `docker compose up -d` |
