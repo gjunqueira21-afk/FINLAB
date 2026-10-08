@@ -205,3 +205,18 @@ def test_so_as_empresas_do_painel_sobem_para_a_memoria(cvm_minima):
     carregadas = cvm._frames("dfp")["dre"]
     assert set(carregadas) == {cd}
     assert cvm._company("dre", cd)["VL_CONTA_AJUSTADO"].tolist() == [130.0]
+
+
+def test_icones_nos_enderecos_padrao_do_iphone():
+    """O iPhone tenta /apple-touch-icon.png por conta própria; os dois
+    endereços e o /favicon.ico devolvem as imagens do FinLab."""
+    from fastapi.testclient import TestClient
+    from finlab.backend.app import app
+
+    c = TestClient(app)
+    for url in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico",
+                "/assets/icones/apple-touch-icon.png", "/assets/manifest.webmanifest"):
+        r = c.get(url)
+        assert r.status_code == 200, url
+    assert c.get("/apple-touch-icon.png").content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert c.get("/apple-touch-icon.png").content == c.get("/assets/icones/apple-touch-icon.png").content

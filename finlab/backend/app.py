@@ -879,6 +879,19 @@ def carteiras_page():
     return FileResponse(WEB_DIR / "carteiras.html")
 
 
+# Os endereços-padrão que o iPhone e os navegadores tentam por conta própria,
+# além dos <link> das páginas. Ficam fora da senha no proxy (só imagens).
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def apple_touch_icon():
+    return FileResponse(WEB_DIR / "assets" / "icones" / "apple-touch-icon.png", media_type="image/png")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(WEB_DIR / "assets" / "icones" / "favicon-32.png", media_type="image/png")
+
+
 @app.exception_handler(404)
 def not_found(_request, exc):
     return JSONResponse(status_code=404, content={"detail": getattr(exc, "detail", "não encontrado")})

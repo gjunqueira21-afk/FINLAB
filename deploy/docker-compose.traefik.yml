@@ -19,5 +19,16 @@ services:
       - traefik.http.routers.finlab.tls=true
       - traefik.http.routers.finlab.tls.certresolver=${TRAEFIK_CERTRESOLVER}
       - traefik.http.routers.finlab.middlewares=finlab-auth
+      - traefik.http.routers.finlab.service=finlab
       - traefik.http.middlewares.finlab-auth.basicauth.users=${FINLAB_USUARIO}:${FINLAB_SENHA_HASH}
       - traefik.http.services.finlab.loadbalancer.server.port=8777
+      # Ícone da tela de início SEM senha: o iPhone baixa o apple-touch-icon
+      # numa requisição à parte, sem as credenciais do site — atrás da senha
+      # ele recebe 401 e mostra uma letra no lugar do logo. Só estes arquivos,
+      # um a um (imagens e o manifest com nome e ícones); nada de dados.
+      - "traefik.http.routers.finlab-icones.rule=Host(`${FINLAB_DOMINIO}`) && (Path(`/apple-touch-icon.png`) || Path(`/apple-touch-icon-precomposed.png`) || Path(`/favicon.ico`) || Path(`/assets/manifest.webmanifest`) || Path(`/assets/icones/apple-touch-icon.png`) || Path(`/assets/icones/icone-192.png`) || Path(`/assets/icones/icone-512.png`) || Path(`/assets/icones/icone-maskable-512.png`) || Path(`/assets/icones/favicon-32.png`) || Path(`/assets/icones/favicon.svg`))"
+      - traefik.http.routers.finlab-icones.priority=1000
+      - traefik.http.routers.finlab-icones.entrypoints=${TRAEFIK_ENTRYPOINT}
+      - traefik.http.routers.finlab-icones.tls=true
+      - traefik.http.routers.finlab-icones.tls.certresolver=${TRAEFIK_CERTRESOLVER}
+      - traefik.http.routers.finlab-icones.service=finlab
