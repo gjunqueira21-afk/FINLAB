@@ -501,3 +501,64 @@ def test_carteira_antiga_estima_entrada_pela_data_de_criacao(sandbox):
     assert c["entradas"]["WEGE3"] == {"p": 40.0, "d": criada, "estimada": True}
     assert carteiras.retornos_desde_entrada(c)["WEGE3"]["retorno"] == pytest.approx(0.1)
     assert "estimada" in carteiras.lamina_md(c)
+
+
+# ---------------------------------------------------------------------------
+# Rebalanceamento conferido contra uma carteira de verdade (em quantidades)
+# ---------------------------------------------------------------------------
+
+def test_cota_bate_com_carteira_em_quantidades_atraves_de_rebalanceamentos(sandbox):
+    """Conferência independente: uma carteira que guarda QUANTIDADES de
+    ações (não pesos), compra e vende nos rebalanceamentos e na troca de
+    composição. A cota do painel tem de bater com o patrimônio dela, passo a
+    passo, sem custo nem caixa sobrando."""
+    alvos = {"WEGE3": 0.5, "PETR4": 0.3, "ITUB4": 0.2}
+    precos = {"WEGE3": 40.0, "PETR4": 30.0, "ITUB4": 25.0}
+    c = carteira_padrao(sandbox)
+
+    patrimonio = 100.0                       # começa valendo a cota inicial
+    qtd = {tk: patrimonio * w / precos[tk] for tk, w in alvos.items()}
+
+    def valor(px):
+        return sum(q * px[tk] for tk, q in qtd.items())
+
+    def confere(c, px, msg):
+        assert c["atual"]["cota"] == pytest.approx(valor(px), abs=1e-3), msg
+        pesos = {tk: q * px[tk] / valor(px) for tk, q in qtd.items()}
+        for tk, w in pesos.items():
+            assert c["atual"]["pesos"][tk] == pytest.approx(w, abs=1e-5), (msg, tk)
+
+    # 1) preços andam: deriva buy-and-hold
+    px = {"WEGE3": 50.0, "PETR4": 27.0, "ITUB4": 26.0}
+    poe_precos(sandbox, px)
+    c = carteiras.atualizar(c["id"])
+    confere(c, px, "deriva depois da alta de WEGE3")
+
+    # 2) rebalanceia: vende o excesso, compra o que falta, patrimônio igual
+    c = carteiras.rebalancear(c["id"])
+    v = valor(px)
+    qtd = {tk: v * w / px[tk] for tk, w in alvos.items()}
+    confere(c, px, "logo após o rebalanceamento")
+    assert all(abs(c["atual"]["pesos"][tk] - w) < 1e-6 for tk, w in alvos.items())
+
+    # 3) anda de novo a partir da base nova
+    px = {"WEGE3": 46.0, "PETR4": 33.0, "ITUB4": 24.0}
+    poe_precos(sandbox, px)
+    c = carteiras.atualizar(c["id"])
+    confere(c, px, "deriva depois do rebalanceamento")
+
+    # 4) troca de composição: sai ITUB4, entra VALE3 (vende tudo e recompra)
+    px = {**px, "VALE3": 70.0}
+    poe_precos(sandbox, px)
+    alvos = {"WEGE3": 0.4, "PETR4": 0.3, "VALE3": 0.3}
+    c = carteiras.editar(c["id"], {"posicoes": [{"ticker": t, "peso": w} for t, w in alvos.items()]})
+    v = valor(px)
+    qtd = {tk: v * w / px[tk] for tk, w in alvos.items()}
+    confere(c, px, "após trocar a composição")
+
+    # 5) anda mais uma vez
+    px = {"WEGE3": 48.0, "PETR4": 31.0, "VALE3": 77.0}
+    poe_precos(sandbox, px)
+    c = carteiras.atualizar(c["id"])
+    confere(c, px, "deriva depois da troca")
+    assert c["atual"]["retorno"] == pytest.approx(valor(px) / 100 - 1, abs=1e-5)
