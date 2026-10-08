@@ -358,6 +358,9 @@ def _janelas(snaps: list[dict], atual: dict, met: dict) -> str:
 
 
 def _posicoes(c: dict, atual: dict) -> str:
+    carteiras._garante_entradas(c)
+    entrada = carteiras.retornos_desde_entrada(c)
+    estimada = any(e.get("estimada") for e in entrada.values())
     pesos = atual.get("pesos") or {}
     rets = atual.get("retornos") or {}
     alvos = atual.get("alvos") or {}
@@ -370,7 +373,7 @@ def _posicoes(c: dict, atual: dict) -> str:
         drift = (pa - p["peso"]) if isinstance(pa, (int, float)) else None
         fora = isinstance(drift, (int, float)) and abs(drift) > banda
         ret = rets.get(tk)
-        contrib = p["peso"] * ret if isinstance(ret, (int, float)) else None
+        ent = entrada.get(tk) or {}
         a = alvos.get(tk) or {}
         alvo_txt = ("R$ " + _num(a["alvo"]) + ('<span class="alvo-ok">atingido</span>' if a.get("atingido") else "")
                     if a else "—")
@@ -380,17 +383,20 @@ def _posicoes(c: dict, atual: dict) -> str:
             f'<span class="forte num">{_pct(p["peso"], sinal=False)}</span></div></td>'
             f'<td>{_pct(pa, sinal=False)}</td>'
             f'<td class="{"fora" if fora else ""}" style="{"" if fora else f"color:{CINZA}"}">{_pp(drift)}</td>'
+            f'<td class="forte" style="color:{_cor(ent.get("retorno"))}">{_pct(ent.get("retorno"))}'
+            f'{"<sup>†</sup>" if ent.get("estimada") else ""}</td>'
             f'<td style="color:{_cor(ret)}">{_pct(ret)}</td>'
             f'<td>{alvo_txt}</td>'
-            f'<td class="forte" style="color:{_cor(a.get("distancia"))}">{_pct(a.get("distancia")) if a else "—"}</td>'
-            f'<td style="color:{_cor(contrib)}">{_pp(contrib, 2)}</td></tr>')
+            f'<td class="forte" style="color:{_cor(a.get("distancia"))}">{_pct(a.get("distancia")) if a else "—"}</td></tr>')
+    nota_estimada = (f' † Entrada estimada pelo fechamento na criação da carteira ({_data(c["criada_em"])}): '
+                     'carteira anterior ao registro de entradas.' if estimada else "")
     return ('<table class="pos"><tr><th>Ativo</th><th>Peso alvo</th><th>Peso atual</th><th>Desvio</th>'
-            '<th>Retorno*</th><th>Target</th><th>Upside</th><th>Contrib.*</th></tr>'
+            '<th>Desde a entrada</th><th>Desde o rebal.*</th><th>Target</th><th>Upside</th></tr>'
             + "".join(linhas) + "</table>"
-            + f'<div class="nota">* Retorno e contribuição (peso alvo × retorno, em p.p. da cota) desde o '
-              f'último rebalanceamento ({_data(c["base"]["data"])}). Desvio = peso atual − peso alvo; '
+            + f'<div class="nota">Desde a entrada = do preço em que o papel entrou na carteira até hoje. '
+              f'* Desde o último rebalanceamento ({_data(c["base"]["data"])}). Desvio = peso atual − peso alvo; '
               f'banda de {_num(banda * 100, 0)} p.p. Upside = distância do preço atual até o target; '
-              '"atingido" marca o papel que já passou do target.</div>')
+              f'"atingido" marca o papel que já passou do target.{nota_estimada}</div>')
 
 
 def html(c: dict) -> str:
