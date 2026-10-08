@@ -9,7 +9,6 @@ venv/
 # Segredos e configuração local
 .env
 finlab/.env
-.streamlit/secrets.toml
 
 # Cache e histórico gerados em tempo de execução
 finlab/data/cache/

@@ -2,7 +2,7 @@
 
 Pipeline Python completo para coleta, tratamento e análise de dados fundamentalistas de empresas abertas brasileiras, diretamente da **CVM Dados Abertos** — sem upload manual, sem dados mockados.
 
-Projetado para suportar valuation por **EPV**, **DCF**, **Franchise Value**, **comparáveis** e **screening fundamentalista**.
+É a base de dados do painel FinLab: as demonstrações oficiais que o painel lê já processadas.
 
 ---
 
@@ -18,13 +18,9 @@ Projetado para suportar valuation por **EPV**, **DCF**, **Franchise Value**, **c
 8. [Como extrair uma conta contábil](#8-como-extrair-uma-conta-contábil)
 9. [Como gerar um snapshot financeiro](#9-como-gerar-um-snapshot-financeiro)
 10. [Como calcular métricas básicas](#10-como-calcular-métricas-básicas)
-11. [Como calcular EPV](#11-como-calcular-epv)
-12. [Como calcular DCF](#12-como-calcular-dcf)
-13. [Limitações da CVM](#13-limitações-da-cvm)
-14. [Por que ticker precisa de outra fonte](#14-por-que-ticker-precisa-de-outra-fonte)
-15. [Como preencher ticker_mapper.csv](#15-como-preencher-ticker_mappercsv)
-16. [Próximos passos](#16-próximos-passos)
-17. [Deploy do dashboard (Streamlit Community Cloud)](#17-deploy-do-dashboard-streamlit-community-cloud)
+11. [Limitações da CVM](#11-limitações-da-cvm)
+12. [Por que ticker precisa de outra fonte](#12-por-que-ticker-precisa-de-outra-fonte)
+13. [Como preencher ticker_mapper.csv](#13-como-preencher-ticker_mappercsv)
 
 ---
 
@@ -35,7 +31,7 @@ Projetado para suportar valuation por **EPV**, **DCF**, **Franchise Value**, **c
 - Normaliza colunas, datas, escalas monetárias e strings
 - Salva tudo em **Parquet** e **CSV** para uso posterior
 - Oferece funções para buscar empresas, extrair contas contábeis e construir snapshots
-- Calcula métricas fundamentalistas, EPV e DCF de forma transparente
+- Calcula métricas fundamentalistas básicas de forma transparente
 - Não inventa dados: registra `None`/`NaN` quando algo está ausente
 
 ---
@@ -89,12 +85,6 @@ python -m src.main --start-year 2019 --end-year 2025 --company-query ITAU
 
 ```bash
 python -m src.main --start-year 2019 --end-year 2025 --skip-download
-```
-
-### Ver exemplo de EPV e DCF
-
-```bash
-python -m src.main --example
 ```
 
 ---
@@ -152,7 +142,7 @@ itr_cia_aberta_DFC_MI_con_2024.csv ← DFC método indireto consolidado
 | Auditoria | Revisão limitada | Auditoria completa |
 | Uso recomendado | Acompanhamento/tendência | Valuation / análise histórica |
 
-**Recomendação:** Use DFP como base principal para valuation e EPV. Use ITR para acompanhamento trimestral.
+**Recomendação:** Use DFP como base principal das séries anuais. Use ITR para acompanhamento trimestral.
 
 ---
 
@@ -246,60 +236,7 @@ print(f"Dívida Líquida: R$ {metrics['divida_liquida']:,.0f}")
 
 ---
 
-## 11. Como calcular EPV
-
-```python
-from src.valuation_epv import epv_from_ebit_series
-
-# Série histórica de EBIT (extraída da DRE via extract_account)
-ebit_historico = [10e9, 12e9, 8e9, 15e9, 11e9]
-
-result = epv_from_ebit_series(
-    ebit_series=ebit_historico,
-    tax_rate=0.34,        # IRPJ + CSLL
-    wacc=0.12,            # Custo de capital (ajuste para cada empresa)
-    net_debt=50e9,        # Dívida líquida (da BPA/BPP)
-    norm_method="median", # mediana é mais conservadora
-)
-
-print(f"EBIT Normalizado: R$ {result['ebit_normalized']:,.0f}")
-print(f"NOPAT:            R$ {result['nopat']:,.0f}")
-print(f"EPV Enterprise:   R$ {result['epv_enterprise']:,.0f}")
-print(f"EPV Equity:       R$ {result['epv_equity']:,.0f}")
-print(f"Flags: {result['flags']}")
-```
-
-**Métodos de normalização disponíveis:**
-- `median` — mediana histórica (mais conservador, padrão)
-- `mean` — média histórica
-- `last` — último ano apenas
-- `mean_3y` — média dos últimos 3 anos
-- `mean_5y` — média dos últimos 5 anos
-
----
-
-## 12. Como calcular DCF
-
-```python
-from src.valuation_dcf import calculate_dcf
-
-result = calculate_dcf(
-    base_fcf=8e9,                          # FCL do ano base
-    growth_rates=[0.08, 0.08, 0.06, 0.06, 0.05],  # 5 anos de projeção
-    terminal_growth=0.03,                  # Crescimento na perpetuidade
-    wacc=0.12,                             # Taxa de desconto
-    net_debt=50e9,                         # Dívida líquida
-)
-
-print(f"Enterprise Value: R$ {result['enterprise_value']:,.0f}")
-print(f"Equity Value:     R$ {result['equity_value']:,.0f}")
-print(f"% do VP no TV:    {result['premissas']['pct_ev_de_valor_terminal']}%")
-print(f"Flags: {result['flags']}")
-```
-
----
-
-## 13. Limitações da CVM
+## 11. Limitações da CVM
 
 | Limitação | Detalhe |
 |-----------|---------|
@@ -315,7 +252,7 @@ print(f"Flags: {result['flags']}")
 
 ---
 
-## 14. Por que ticker precisa de outra fonte
+## 12. Por que ticker precisa de outra fonte
 
 A CVM cadastra empresas pelo **CNPJ** e **CD_CVM**, não pelo ticker da B3.  
 Uma mesma empresa pode ter múltiplos tickers (ON, PN, Units).  
@@ -326,7 +263,7 @@ Fontes recomendadas para obter tickers:
 
 ---
 
-## 15. Como preencher ticker_mapper.csv
+## 13. Como preencher ticker_mapper.csv
 
 Após rodar o pipeline, o arquivo `data/processed/ticker_mapper.csv` é gerado com:
 
@@ -342,85 +279,6 @@ import requests
 # GET https://brapi.dev/api/quote/list
 # Mapear DENOM_CIA → shortName para cruzar com ticker
 ```
-
----
-
-## 16. Próximos passos
-
-O projeto está preparado para integrar:
-
-| Funcionalidade | Como integrar |
-|----------------|---------------|
-| **Cotação em tempo real** | `brapi.dev` ou `yfinance` |
-| **Selic / IPCA / CDI / Câmbio** | Banco Central SGS (`api.bcb.gov.br`) |
-| **Juros futuros (DI)** | B3 ou Anbima |
-| **Prêmio de risco Brasil** | CDS 5Y ou Damodaran country risk |
-| **WACC dinâmico** | Compor Rf (Selic) + Beta + Prêmio de risco |
-| **Monte Carlo** | `numpy.random` para simular WACC e crescimento |
-| **DCF vivo diário** | Combinar dados CVM + cotação + Selic do dia |
-| **Ranking por desconto** | Comparar market cap atual vs EPV/DCF calculado |
-| **Franchise Value** | `Franchise Value = EPV com crescimento - EPV sem crescimento` |
-| **Comparáveis** | Agrupar por setor + calcular medianas de múltiplos |
-
----
-
-## 17. Deploy do dashboard (Streamlit Community Cloud)
-
-A forma mais simples e gratuita de colocar o `dashboard.py` no ar com uma URL pública é o
-[Streamlit Community Cloud](https://share.streamlit.io). O projeto já está preparado para isso:
-o `BrapiClient` lê o token tanto de `.env` (uso local) quanto de `st.secrets` (uso na nuvem).
-
-### Passo a passo
-
-1. **Garanta que o repositório está no GitHub** com o código e os arquivos em
-   `valuation_cvm/data/processed/*.parquet` versionados (são a base fundamentalista da CVM —
-   sem eles o dashboard não tem dados históricos).
-
-2. Acesse **https://share.streamlit.io** e faça login com a sua conta GitHub.
-
-3. Clique em **"New app"** e configure:
-   - **Repository:** `gjunqueira21-afk/EPS-VALUE-DASHBOARD-`
-   - **Branch:** a branch que você quer publicar (ex.: `main`, após o merge do PR)
-   - **Main file path:** `valuation_cvm/dashboard.py`
-
-4. Em **"Advanced settings" → "Secrets"**, cole:
-
-   ```toml
-   BRAPI_TOKEN = "seu_token_aqui"
-   ```
-
-   Esse é o único segredo necessário — o restante (Selic, IPCA, câmbio, opções) usa a mesma
-   chave da BRAPI.
-
-5. Clique em **"Deploy"**. Em alguns minutos o app fica disponível em uma URL pública do tipo
-   `https://<nome-do-app>.streamlit.app`. A cada novo `git push` na branch escolhida, o
-   Streamlit Cloud reimplanta automaticamente.
-
-### Sobre "tempo real"
-
-- **Cotações, opções, câmbio e indicadores macro** vêm da BRAPI a cada visita/recarregamento da
-  página, respeitando os caches já configurados no dashboard (`@st.cache_data`):
-  cotação 60s, cadeia de opções 120s, vencimentos e macro 5min. Ou seja, dentro dessas janelas
-  o app reaproveita a última resposta — fora delas, busca dados novos da BRAPI.
-- **Dados fundamentalistas da CVM** (DRE, BPA, BPP, DFC) são trimestrais/anuais e ficam nos
-  `.parquet` versionados no repositório. Para atualizar, rode o pipeline localmente
-  (`python -m src.main --start-year 2019 --end-year 2026`) e faça commit/push dos novos
-  arquivos — o app na nuvem passa a usar os dados atualizados no próximo deploy automático.
-
-### Segurança
-
-- Nunca faça commit do arquivo `.env` nem do token BRAPI em texto plano — use sempre o gerenciador
-  de **Secrets** do Streamlit Cloud (`App settings → Secrets`).
-- Se quiser testar `st.secrets` localmente, crie `valuation_cvm/.streamlit/secrets.toml` (já
-  ignorado pelo Git) com o mesmo conteúdo do passo 4.
-
-### Alternativas
-
-| Plataforma | Quando usar |
-|------------|-------------|
-| **Streamlit Community Cloud** | Recomendado — gratuito, deploy direto do GitHub, suporte nativo a `st.secrets` |
-| **Hugging Face Spaces** (SDK Streamlit) | Alternativa gratuita, útil se já usa o ecossistema HF |
-| **Render / Railway** | Para quem precisa de mais controle (Docker, variáveis de ambiente, domínio próprio) |
 
 ---
 
@@ -445,11 +303,7 @@ valuation_cvm/
 │   ├── company_mapper.py  ← Busca e mapeamento de empresas
 │   ├── financial_statements.py  ← Extração e snapshots
 │   ├── valuation_metrics.py     ← Métricas fundamentalistas
-│   ├── valuation_epv.py         ← Cálculo de EPV
-│   ├── valuation_dcf.py         ← Cálculo de DCF
 │   └── main.py                  ← CLI principal
-└── notebooks/
-    └── 01_exploracao_cvm.ipynb  ← Análise exploratória
 ```
 
 ---

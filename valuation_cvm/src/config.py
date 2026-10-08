@@ -35,12 +35,6 @@ CVM_CADASTRO_URL = f"{CVM_BASE_URL}/CAD/DADOS/cad_cia_aberta.csv"
 CVM_ZIP_URL_TEMPLATES = {
     "ITR": f"{CVM_BASE_URL}/DOC/ITR/DADOS/itr_cia_aberta_{{ano}}.zip",
     "DFP": f"{CVM_BASE_URL}/DOC/DFP/DADOS/dfp_cia_aberta_{{ano}}.zip",
-    # IPE — Informações Periódicas e Eventuais. É o índice do que a companhia
-    # comunicou ao mercado: fato relevante, comunicado, press-release,
-    # apresentação e calendário de eventos, cada linha com Link_Download
-    # apontando para o PDF no RAD/ENET. ~1 MB por ano, e é a única fonte
-    # pública que responde "o que aconteceu nesta empresa desde o balanço".
-    "IPE": f"{CVM_BASE_URL}/DOC/IPE/DADOS/ipe_cia_aberta_{{ano}}.zip",
 }
 
 # ---------------------------------------------------------------------------
