@@ -33,7 +33,6 @@ COLUNAS_LIDAS = ("CD_CVM", "DENOM_CIA", "CNPJ_CIA", "CD_CONTA", "DS_CONTA",
                  "VL_CONTA_AJUSTADO", "ANO_REFER", "DT_FIM_EXERC",
                  "DT_INI_EXERC", "ORDEM_EXERC")
 MAX_YEARS = 10
-MAX_TRIMESTRES = 12
 
 # As mesmas contas servem o anual e o trimestral de propósito: o 4T sai da
 # diferença entre o exercício fechado (DFP) e o acumulado até o 3T (ITR), e
@@ -144,10 +143,6 @@ def available() -> bool:
                and (CVM_PROCESSED_DIR / f"{st}_dfp.parquet").stat().st_size > 0
                for st in STATEMENTS)
 
-
-def quarterly_available() -> bool:
-    """True quando o pipeline já gerou os parquets do ITR."""
-    return any(not df.empty for df in _frames("itr").values())
 
 
 def latest_quarter(cd_cvm: str) -> Optional[dict]:
@@ -461,64 +456,6 @@ def ltm_series(cd_cvm: str) -> dict:
                    "divida_cp", "divida_lp", "caixa_total"],
     }
 
-
-def quarterly_series(cd_cvm: str, max_tri: int = MAX_TRIMESTRES) -> dict:
-    """Trimestres isolados e LTM por empresa, prontos para o painel.
-
-    Devolve {"pontos": [...], "campos": [...]}; lista vazia quando o pipeline
-    ainda não gerou os parquets do ITR — e aí o painel segue anual.
-    """
-    vazio: dict = {"pontos": [], "campos": []}
-    if not cd_cvm:
-        return vazio
-
-    dre = _company("dre", cd_cvm, "itr")
-    if dre.empty or "DT_FIM_EXERC" not in dre.columns:
-        return vazio
-    dre = _acumulado_do_exercicio(dre)
-    if dre.empty:
-        return vazio
-
-    abertura = (dre.drop_duplicates("DT_FIM_EXERC")
-                   .set_index("DT_FIM_EXERC")["DT_INI_EXERC"].to_dict()
-                if "DT_INI_EXERC" in dre.columns else {})
-    if not abertura:
-        return vazio
-
-    campos = {"receita": CONTA_RECEITA, "lucro_liquido": CONTA_LUCRO}
-    acumulado = {nome: _series(dre, cod, kw, chave="DT_FIM_EXERC")
-                 for nome, (cod, kw) in campos.items()}
-    if not any(acumulado.values()):
-        return vazio
-
-    dre_anual = _company("dre", cd_cvm)
-    anual = ({nome: _series(dre_anual, cod, kw) for nome, (cod, kw) in campos.items()}
-             if not dre_anual.empty else {})
-
-    isolado = {nome: _desacumula(serie, abertura, anual.get(nome, {}))
-               for nome, serie in acumulado.items()}
-    ltm = {nome: _ltm(serie) for nome, serie in isolado.items()}
-
-    datas = sorted(set().union(*[set(s) for s in isolado.values()]))[-max_tri:]
-    pontos = []
-    for fim in datas:
-        ini = abertura.get(fim)
-        # O 4T é derivado: não tem linha própria no ITR, logo não tem abertura.
-        derivado = ini is None
-        if derivado:
-            ini = pd.Timestamp(fim) - pd.DateOffset(years=1) + pd.Timedelta(days=1)
-        tri = _indice_do_trimestre(pd.Timestamp(ini), pd.Timestamp(fim))
-        ponto = {
-            "fim": str(pd.Timestamp(fim).date()),
-            "rotulo": f"{tri}T{str(pd.Timestamp(fim).year)[-2:]}",
-            "derivado": derivado,
-        }
-        for nome in campos:
-            ponto[nome] = isolado[nome].get(fim)
-            ponto[nome + "_ltm"] = ltm[nome].get(fim)
-        pontos.append(ponto)
-
-    return {"pontos": pontos, "campos": list(campos)}
 
 
 # ---------------------------------------------------------------------------
@@ -980,170 +917,6 @@ def _series_dre_anual(dre: pd.DataFrame, dfc: pd.DataFrame, fin: bool) -> dict:
                        if not fin else {})
     return saida
 
-
-def dre_anual(cd_cvm: str, max_anos: int = 6) -> dict:
-    """DRE dos últimos exercícios, com CAGR da janela inteira."""
-    vazio = {"anos": [], "linhas": [], "financial": False, "cagr_span": 0}
-    if not cd_cvm:
-        return vazio
-    dre = _company("dre", cd_cvm)
-    if dre.empty:
-        return vazio
-    fin = is_financial_statement(cd_cvm)
-    series = _series_dre_anual(dre, _company("dfc_mi", cd_cvm), fin)
-
-    anos = sorted({a for s in series.values() for a in s})[-max_anos:]
-    if not anos:
-        return vazio
-    linhas = _monta_dre(series, anos, fin)
-    for linha in linhas:
-        # Margem não tem CAGR: taxa composta de um percentual não quer dizer
-        # nada. Dedução tampouco — o CAGR do CPV interessa em módulo, e ele
-        # já é lido junto da receita.
-        linha["cagr"] = (_cagr(linha["valores"], len(anos) - 1)
-                         if linha["tipo"] in ("valor", "total", "hero") else None)
-    return {"anos": anos, "linhas": linhas, "financial": fin,
-            "cagr_span": len(anos) - 1}
-
-
-def dre_trimestral(cd_cvm: str) -> dict:
-    """Trimestres do ano corrente, desacumulados, com Δ contra o ano anterior.
-
-    O ITR vem acumulado no exercício; a desacumulação é a mesma de
-    `quarterly_series`. O Δ a/a compara cada trimestre com o mesmo trimestre
-    do ano anterior — que é a comparação que a sazonalidade não distorce.
-    """
-    vazio = {"colunas": [], "linhas": [], "financial": False, "ano": None}
-    if not cd_cvm:
-        return vazio
-    dre = _company("dre", cd_cvm, "itr")
-    if dre.empty or "DT_FIM_EXERC" not in dre.columns:
-        return vazio
-    dre = _acumulado_do_exercicio(dre)
-    if dre.empty:
-        return vazio
-    # Chaves normalizadas para Timestamp: as séries vêm de _collapse com
-    # Timestamp, e se a coluna do parquet estiver como texto o `.get()` daria
-    # None para tudo — a tabela sumiria inteira, sem erro nenhum. Falha
-    # silenciosa é a pior; normalizar aqui custa nada.
-    abertura = {}
-    if "DT_INI_EXERC" in dre.columns:
-        for fim, ini in (dre.drop_duplicates("DT_FIM_EXERC")
-                            .set_index("DT_FIM_EXERC")["DT_INI_EXERC"].to_dict().items()):
-            abertura[pd.Timestamp(fim)] = pd.Timestamp(ini)
-    if not abertura:
-        return vazio
-
-    fin = is_financial_statement(cd_cvm)
-    dre_anual_df = _company("dre", cd_cvm)
-    dfc_itr = _company("dfc_mi", cd_cvm, "itr")
-
-    acumulado, anual = {}, {}
-    for chave, _rot, tipo, conta in _LINHAS_DRE:
-        if conta is None:
-            continue
-        acumulado[chave] = _series(dre, *conta, chave="DT_FIM_EXERC")
-        anual[chave] = _series(dre_anual_df, *conta) if not dre_anual_df.empty else {}
-    if not any(acumulado.values()):
-        return vazio
-
-    series = {c: _desacumula(s, abertura, anual.get(c, {})) for c, s in acumulado.items()}
-
-    # D&A trimestral vem da DFC do ITR, também acumulada no exercício.
-    if not dfc_itr.empty:
-        da_acc = {d: abs(v) for d, v in _depreciation(dfc_itr, chave="DT_FIM_EXERC").items()}
-        da_anual = ({a: abs(v) for a, v in _depreciation(_company("dfc_mi", cd_cvm)).items()}
-                    if not _company("dfc_mi", cd_cvm).empty else {})
-        deprec = _desacumula(da_acc, abertura, da_anual)
-    else:
-        deprec = {}
-    series["da"] = {d: -v for d, v in deprec.items()}
-    ebit = series.get("ebit") or {}
-    series["ebitda"] = ({d: ebit[d] + deprec[d] for d in ebit if d in deprec}
-                        if not fin else {})
-
-    datas = sorted({d for s in series.values() for d in s})
-    if not datas:
-        return vazio
-    ano = pd.Timestamp(datas[-1]).year
-    do_ano = [d for d in datas if pd.Timestamp(d).year == ano]
-    if not do_ano:
-        return vazio
-
-    colunas = []
-    for fim in do_ano:
-        ini = abertura.get(fim)
-        derivado = ini is None                       # o 4T não tem linha própria
-        if derivado:
-            ini = pd.Timestamp(fim) - pd.DateOffset(years=1) + pd.Timedelta(days=1)
-        tri = _indice_do_trimestre(pd.Timestamp(ini), pd.Timestamp(fim))
-        colunas.append({"fim": str(pd.Timestamp(fim).date()),
-                        "rotulo": f"{tri}T{str(ano)[-2:]}", "tri": tri,
-                        "derivado": derivado, "acumulado": False})
-
-    # A coluna acumulada: 1S, 9M ou o ano, conforme quantos trimestres saíram.
-    n = len(colunas)
-    rotulo_acc = {1: None, 2: "1S", 3: "9M", 4: "Ano"}.get(n)
-    if rotulo_acc:
-        colunas.append({"fim": colunas[-1]["fim"],
-                        "rotulo": f"{rotulo_acc}{str(ano)[-2:]}",
-                        "tri": None, "derivado": False, "acumulado": True})
-
-    # A chave de período é o ÍNDICE da coluna, não a data-fim: a coluna
-    # acumulada termina no mesmo dia do último trimestre, e chavear por data
-    # faria uma sobrescrever a outra — o 2T apareceria com o valor do 1S.
-    periodos = list(range(len(colunas)))
-    somaveis = {"receita", "cpv", "lucro_bruto", "despesas", "ebitda", "da",
-                "ebit", "resultado_financeiro", "ir", "lucro_liquido"}
-    series_col = {}
-    for chave, serie in series.items():
-        por_periodo = {}
-        for i, col in enumerate(colunas):
-            if not col["acumulado"]:
-                por_periodo[i] = serie.get(pd.Timestamp(col["fim"]))
-            elif chave in somaveis:
-                vals = [serie.get(pd.Timestamp(c["fim"])) for c in colunas[:i]]
-                vals = [v for v in vals if v is not None]
-                # Acumulado incompleto seria menor que a soma real e passaria
-                # despercebido: sem todos os trimestres, a coluna fica vazia.
-                por_periodo[i] = (sum(vals) if len(vals) == i else None)
-        series_col[chave] = por_periodo
-
-    linhas = _monta_dre(series_col, periodos, fin)
-
-    # Δ a/a: mesmo trimestre do ano anterior, por índice de trimestre.
-    anterior = {}
-    for chave, serie in series.items():
-        por_tri = {}
-        for d, v in serie.items():
-            if pd.Timestamp(d).year != ano - 1:
-                continue
-            ini_ant = abertura.get(d)
-            if ini_ant is None:
-                ini_ant = pd.Timestamp(d) - pd.DateOffset(years=1) + pd.Timedelta(days=1)
-            por_tri[_indice_do_trimestre(pd.Timestamp(ini_ant), pd.Timestamp(d))] = v
-        anterior[chave] = por_tri
-
-    for linha in linhas:
-        if linha["tipo"] == "margem":
-            linha["yoy"] = [None] * len(colunas)
-            continue
-        yoy = []
-        for i, col in enumerate(colunas):
-            atual = linha["valores"][i]
-            if col["acumulado"]:
-                base = [anterior.get(linha["chave"], {}).get(c["tri"]) for c in colunas[:i]]
-                base = [b for b in base if b is not None]
-                antes = sum(base) if len(base) == i else None
-            else:
-                antes = anterior.get(linha["chave"], {}).get(col["tri"])
-            # Base negativa ou zero não produz variação percentual legível.
-            yoy.append((atual / antes - 1) if (isinstance(atual, (int, float))
-                                               and isinstance(antes, (int, float))
-                                               and antes > 0) else None)
-        linha["yoy"] = yoy
-
-    return {"colunas": colunas, "linhas": linhas, "financial": fin, "ano": ano}
 
 
 # Linhas que somam no tempo (o resto são margens, calculadas por coluna).

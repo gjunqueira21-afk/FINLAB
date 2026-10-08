@@ -823,7 +823,7 @@ def _consenso_bdr(info: dict, preco_bdr) -> dict:
 # Fundamentos (CVM, Yahoo dos BDRs) ficam: só mudam com resultado novo, e
 # refazê-los a cada clique era o que deixava o botão lento.
 _CACHE_DE_MERCADO = ("brapi:quote", "brapi:fund", "brapi:mult", "overview", "etfs:rows",
-                     "bdrs:rows", "macro", "curva", "pulse", "probe", "b3:bdi")
+                     "bdrs:rows", "macro", "pulse", "probe", "b3:bdi")
 
 
 @app.post("/api/cache/clear")

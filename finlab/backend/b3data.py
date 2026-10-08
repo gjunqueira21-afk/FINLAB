@@ -25,7 +25,7 @@ from typing import Optional
 import requests
 
 from . import cache
-from .settings import HTTP_TIMEOUT, TTL_MACRO
+from .settings import HTTP_TIMEOUT
 
 PULSE_BASE = "https://raw.githubusercontent.com/PulseDataLabs/PulseFlat/main/data"
 TTL_BDI = 6 * 3600          # o boletim é D-1: 6h de cache bastam
@@ -98,9 +98,6 @@ def bdi() -> dict[str, dict]:
     except Exception:
         return {}
 
-
-def bdi_asset(code: str) -> Optional[dict]:
-    return bdi().get(code.upper().strip())
 
 
 # ---------------------------------------------------------------------------

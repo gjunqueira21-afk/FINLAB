@@ -13,7 +13,6 @@ data/cache/
 
 # Env
 .env
-.streamlit/secrets.toml
 
 # Jupyter checkpoints
 .ipynb_checkpoints/

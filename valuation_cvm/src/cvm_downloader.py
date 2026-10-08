@@ -198,16 +198,16 @@ def download_all_cvm_data(
     }
     """
     create_directories()
-    results: dict = {"cadastro": None, "ITR": {}, "DFP": {}, "IPE": {}}
+    results: dict = {"cadastro": None, "ITR": {}, "DFP": {}}
 
     logger.info("=== Iniciando download dos dados CVM (%d a %d) ===", start_year, end_year)
 
     # 1. Cadastro
     results["cadastro"] = download_cvm_cadastro(force_download=force_download)
 
-    # 2. ITR, DFP e IPE por ano
+    # 2. ITR e DFP por ano
     for ano in range(start_year, end_year + 1):
-        for tipo_doc in ["ITR", "DFP", "IPE"]:
+        for tipo_doc in ["ITR", "DFP"]:
             path = download_cvm_zip(tipo_doc, ano, force_download=force_download)
             results[tipo_doc][ano] = path
             if path is None:
@@ -215,11 +215,11 @@ def download_all_cvm_data(
 
     # Resumo
     anos = end_year - start_year + 1
-    ok = {t: sum(1 for v in results[t].values() if v is not None) for t in ("ITR", "DFP", "IPE")}
+    ok = {t: sum(1 for v in results[t].values() if v is not None) for t in ("ITR", "DFP")}
     logger.info(
-        "=== Download concluído | Cadastro: %s | ITR: %d/%d | DFP: %d/%d | IPE: %d/%d ===",
+        "=== Download concluído | Cadastro: %s | ITR: %d/%d | DFP: %d/%d ===",
         "OK" if results["cadastro"] else "FALHOU",
-        ok["ITR"], anos, ok["DFP"], anos, ok["IPE"], anos,
+        ok["ITR"], anos, ok["DFP"], anos,
     )
 
     return results
