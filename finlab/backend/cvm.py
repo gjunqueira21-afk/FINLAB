@@ -21,6 +21,8 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from .settings import CVM_PROCESSED_DIR
@@ -47,35 +49,69 @@ CONTA_LUCRO = (["3.11", "3.09"], ["LUCRO/PREJUIZO CONSOLIDADO DO PERIODO",
 # Carregamento
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=4)
-def _frames(tipo: str = "dfp") -> dict[str, pd.DataFrame]:
-    """Carrega os quatro demonstrativos uma única vez por processo.
+def _empresas_do_painel() -> set[str]:
+    """Códigos CVM das ações do painel — as únicas que ele consulta."""
+    from . import universe
+    return {str(c.cd_cvm).strip() for c in universe.UNIVERSE if c.cd_cvm}
 
-    `tipo` é o sufixo do pipeline: "dfp" (anual) ou "itr" (trimestral). O
-    sufixo era fixo em _dfp — o achado 00.3 do diagnóstico: o pipeline em
-    valuation_cvm já baixa e processa o ITR, e o painel simplesmente não lia.
+
+def _ler_so_do_painel(fp, empresas: set[str]) -> pd.DataFrame:
+    """Lê o parquet em blocos e guarda só as linhas das empresas do painel.
+
+    Em blocos para o pico de memória ser o de um bloco, não o do arquivo
+    inteiro: o DFC do ITR de uma década passa de um milhão de linhas.
     """
-    out: dict[str, pd.DataFrame] = {}
+    arq = pq.ParquetFile(fp)
+    colunas = [c for c in COLUNAS_LIDAS if c in set(arq.schema_arrow.names)]
+    alvo = pa.array(sorted(empresas), type=pa.string())
+    partes = []
+    for bloco in arq.iter_batches(columns=colunas, batch_size=100_000):
+        cd = pc.utf8_trim_whitespace(bloco.column("CD_CVM").cast(pa.string()))
+        partes.append(bloco.filter(pc.is_in(cd, value_set=alvo)))
+    tabela = (pa.Table.from_batches(partes) if partes
+              else arq.schema_arrow.empty_table().select(colunas))
+    return tabela.to_pandas()
+
+
+@lru_cache(maxsize=4)
+def _frames(tipo: str = "dfp") -> dict[str, dict[str, pd.DataFrame]]:
+    """Carrega os quatro demonstrativos uma única vez por processo, já
+    separados por empresa: {demonstrativo: {CD_CVM: linhas}}.
+
+    `tipo` é o sufixo do pipeline: "dfp" (anual) ou "itr" (trimestral).
+
+    Só o índice por empresa fica guardado. Guardar também o quadro inteiro
+    (como antes) mantinha cada demonstrativo duas vezes na memória.
+    """
+    out: dict[str, dict[str, pd.DataFrame]] = {}
     for st in STATEMENTS:
         fp = CVM_PROCESSED_DIR / f"{st}_{tipo}.parquet"
         if not fp.exists():
-            out[st] = pd.DataFrame()
+            out[st] = {}
             continue
         # Só as colunas que este módulo lê. O parquet do pipeline guarda tudo
         # que a CVM manda (versão, moeda, escala, ordem, grupo…), e o ITR de
         # uma década é grande o bastante para a diferença aparecer no tempo de
         # abrir a primeira empresa. Colunas ausentes são ignoradas: o formato
         # do parquet mudou entre versões do pipeline.
+        #
+        # E só as linhas das empresas do painel: a CVM traz as ~740 companhias
+        # abertas e o painel lê 90. Carregar todas custava mais de 1 GB — o
+        # bastante para o sistema matar o processo numa VPS que divide a
+        # memória com outros serviços. O filtro é aplicado na leitura, então
+        # as outras empresas nem chegam a ocupar memória.
+        empresas = _empresas_do_painel()
         try:
-            disponiveis = set(pq.ParquetFile(fp).schema.names)
-            df = pd.read_parquet(fp, columns=[c for c in COLUNAS_LIDAS if c in disponiveis])
+            df = _ler_so_do_painel(fp, empresas)
         except Exception:
             df = pd.read_parquet(fp)
+            df = df[df["CD_CVM"].astype(str).str.strip().isin(empresas)]
         # Exercício comparativo: a CVM repete o período anterior em toda
         # entrega. Descartar aqui corta linha à toa e evita que _collapse
         # escolha um valor reapresentado no lugar do corrente.
         if "ORDEM_EXERC" in df.columns:
-            corrente = df["ORDEM_EXERC"].astype(str).map(_norm).str.startswith("ULTIMO")
+            ordem = df["ORDEM_EXERC"].astype(str)
+            corrente = ordem.map({o: _norm(o).startswith("ULTIMO") for o in ordem.unique()})
             if corrente.any():
                 df = df[corrente]
         df["CD_CVM"] = df["CD_CVM"].astype(str).str.strip()
@@ -94,7 +130,13 @@ def _frames(tipo: str = "dfp") -> dict[str, pd.DataFrame]:
         codigos = pd.Series(df["CD_CONTA"].unique())
         df["_LVL"] = df["CD_CONTA"].map(
             dict(zip(codigos, codigos.map(lambda c: c.count("."))))).astype("int16")
-        out[st] = df
+        # Texto que se repete linha a linha (nome, CNPJ, conta) vira categoria:
+        # cada valor distinto guardado uma vez, e não milhões de cópias.
+        for col in ("DENOM_CIA", "CNPJ_CIA", "CD_CONTA", "DS_CONTA", "DS_NORM", "ORDEM_EXERC"):
+            if col in df.columns:
+                df[col] = df[col].astype("category")
+        out[st] = _por_cd(df)
+        del df
     return out
 
 
@@ -130,9 +172,8 @@ def _norm(s: object) -> str:
 
 
 def limpar_cache() -> None:
-    """Zera os quadros e o índice por empresa — os dois vivem juntos."""
+    """Zera os demonstrativos carregados."""
     _frames.cache_clear()
-    _por_empresa.cache_clear()
 
 
 def available() -> bool:
@@ -462,9 +503,8 @@ def ltm_series(cd_cvm: str) -> dict:
 # Extração de contas
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=8)
-def _por_empresa(st: str, tipo: str) -> dict:
-    """Índice CD_CVM → linhas, montado uma vez por demonstrativo.
+def _por_cd(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Índice CD_CVM → linhas.
 
     A varredura era `df[df["CD_CVM"] == cd]`: uma passada pelo quadro inteiro
     a cada consulta. A tela principal faz isso 90 vezes × 4 demonstrativos ×
@@ -472,14 +512,13 @@ def _por_empresa(st: str, tipo: str) -> dict:
     montar a lista de ações. Agrupar uma vez troca a varredura por uma busca
     em dicionário.
     """
-    df = _frames(tipo).get(st)
-    if df is None or df.empty:
+    if df.empty:
         return {}
     return {str(cd): grupo for cd, grupo in df.groupby("CD_CVM", sort=False)}
 
 
 def _company(st: str, cd_cvm: str, tipo: str = "dfp") -> pd.DataFrame:
-    grupo = _por_empresa(st, tipo).get(str(cd_cvm).strip())
+    grupo = _frames(tipo).get(st, {}).get(str(cd_cvm).strip())
     return pd.DataFrame() if grupo is None else grupo
 
 

@@ -193,3 +193,15 @@ def test_botao_atualizar_limpa_so_o_mercado_e_a_resposta_vem_comprimida(cache_is
 
     r = c.get("/api/universe", headers={"Accept-Encoding": "gzip"})
     assert r.headers.get("content-encoding") == "gzip"
+
+
+def test_so_as_empresas_do_painel_sobem_para_a_memoria(cvm_minima):
+    """A CVM traz ~740 companhias e o painel lê 90: as outras não podem
+    ocupar memória — carregá-las fazia a VPS matar o processo."""
+    cd = universe.get("WEGE3").cd_cvm
+    pd.DataFrame([_linha(cd, "2025-12-31", RE, 130), _linha("999999", "2025-12-31", RE, 7)]
+                 ).to_parquet(cvm_minima / "dre_dfp.parquet", index=False)
+    cvm.limpar_cache()
+    carregadas = cvm._frames("dfp")["dre"]
+    assert set(carregadas) == {cd}
+    assert cvm._company("dre", cd)["VL_CONTA_AJUSTADO"].tolist() == [130.0]
