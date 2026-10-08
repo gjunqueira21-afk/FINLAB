@@ -336,19 +336,6 @@ Exemplos:
         default=False,
         help="Pula etapa de download (usa cache existente)",
     )
-    parser.add_argument(
-        "--docs",
-        action="store_true",
-        default=False,
-        help="Baixa e indexa os PDFs do índice IPE (lento: Crawl-Delay de 10s "
-             "por documento; incremental entre execuções)",
-    )
-    parser.add_argument(
-        "--docs-limite",
-        type=int,
-        default=None,
-        help="Teto de documentos baixados nesta rodada de --docs",
-    )
     return parser.parse_args()
 
 
@@ -384,12 +371,6 @@ def main() -> None:
     logger.info("Processando demonstrativos financeiros...")
     process_and_save_statements(years)
     process_and_save_ipe(years)
-
-    # 4b. Documentos (opt-in: horas de Crawl-Delay na primeira carga)
-    if args.docs:
-        from .ipe_docs import indexar
-        logger.info("Baixando e indexando os PDFs do IPE (--docs)...")
-        indexar(limite_total=args.docs_limite)
 
     # 5. Criar template de ticker_mapper
     if not df_cadastro.empty:

@@ -12,9 +12,6 @@ from __future__ import annotations
 
 import json
 import sys
-import threading
-import http.server
-import socketserver
 from pathlib import Path
 
 import pytest
@@ -1166,88 +1163,8 @@ def test_ltm_vazio_sem_itr(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Radar de Contexto (busca ao vivo) e camada de momento
+# DRE da página da empresa
 # ---------------------------------------------------------------------------
-
-def _pdf_minimo(texto: str) -> bytes:
-    """Um PDF de verdade, com uma página e o texto pedido, sem dependência.
-
-    Os offsets do xref são calculados, não chutados — pypdf valida a
-    estrutura, e é justamente a extração real que o teste quer exercitar.
-    """
-    conteudo = f"BT /F1 11 Tf 40 700 Td ({texto}) Tj ET".encode("latin-1", "replace")
-    objetos = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-         b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>"),
-        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(conteudo), conteudo),
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    ]
-    saida = bytearray(b"%PDF-1.4\n")
-    offsets = []
-    for i, corpo in enumerate(objetos, start=1):
-        offsets.append(len(saida))
-        saida += b"%d 0 obj\n%s\nendobj\n" % (i, corpo)
-    inicio_xref = len(saida)
-    saida += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objetos) + 1)
-    for off in offsets:
-        saida += b"%010d 00000 n \n" % off
-    saida += (b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF"
-              % (len(objetos) + 1, inicio_xref))
-    return bytes(saida)
-
-
-def _importar_ipe_docs():
-    raiz = Path(__file__).resolve().parents[2] / "valuation_cvm"
-    sys.path.insert(0, str(raiz))
-    try:
-        from src import ipe_docs  # noqa: E402
-        return ipe_docs
-    finally:
-        sys.path.pop(0)
-
-
-def test_selecao_respeita_categoria_universo_janela_e_teto():
-    import pandas as pd
-    ipe_docs = _importar_ipe_docs()
-
-    hoje = pd.Timestamp.today()
-    linhas = []
-    for i in range(10):
-        linhas.append({"Codigo_CVM": "9512", "Categoria": "Fato Relevante",
-                       "Data_Entrega": hoje - pd.Timedelta(days=i * 30),
-                       "Protocolo_Entrega": f"A{i}", "Link_Download": "https://x/a.pdf"})
-    linhas.append({"Codigo_CVM": "9512", "Categoria": "Assembleia",
-                   "Data_Entrega": hoje, "Protocolo_Entrega": "IRRELEV",
-                   "Link_Download": "https://x/b.pdf"})
-    linhas.append({"Codigo_CVM": "777777", "Categoria": "Fato Relevante",
-                   "Data_Entrega": hoje, "Protocolo_Entrega": "FORA",
-                   "Link_Download": "https://x/c.pdf"})
-    linhas.append({"Codigo_CVM": "9512", "Categoria": "Fato Relevante",
-                   "Data_Entrega": hoje - pd.Timedelta(days=900),
-                   "Protocolo_Entrega": "VELHO", "Link_Download": "https://x/d.pdf"})
-
-    sel = ipe_docs._selecionar(pd.DataFrame(linhas), meses=24, por_empresa=4,
-                               universo={"9512"})
-    protocolos = list(sel["Protocolo_Entrega"])
-    assert len(protocolos) == 4                      # teto por empresa
-    assert "IRRELEV" not in protocolos               # categoria fora da lista
-    assert "FORA" not in protocolos                  # empresa fora do universo
-    assert "VELHO" not in protocolos                 # fora da janela
-    assert protocolos == sorted(protocolos, key=lambda p: int(p[1:]))  # mais novos
-
-
-def test_corte_em_paragrafos_com_rabicho_juntado():
-    ipe_docs = _importar_ipe_docs()
-    paragrafo = "x" * 500
-    texto = "\n\n".join([paragrafo, paragrafo, paragrafo, "fim curto"])
-    trechos = ipe_docs._cortar(texto)
-    assert all(len(t) <= ipe_docs.CHUNK_ALVO + 600 for t in trechos)
-    # o rabicho curto não vira trecho próprio
-    assert trechos[-1].endswith("fim curto") and len(trechos[-1]) > len("fim curto")
-    assert ipe_docs._cortar("") == []
-
 
 def test_dre_anual_monta_as_linhas_com_margens_e_cagr(tmp_path, monkeypatch):
     """A DRE de leitura: ordem contábil, margens derivadas da receita, CAGR só

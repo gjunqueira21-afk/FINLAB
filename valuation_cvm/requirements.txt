@@ -7,5 +7,3 @@ pyarrow>=12.0.0
 openpyxl>=3.1.0
 streamlit>=1.28.0
 plotly>=5.15.0
-# Etapa --docs: extração de texto dos PDFs do IPE
-pypdf>=4.0
