@@ -7,9 +7,17 @@
 {$FINLAB_DOMINIO} {
 	encode gzip
 
-	basic_auth {
-		{$FINLAB_USUARIO} {$FINLAB_SENHA_HASH}
+	# Ícone da tela de início sem senha: o iPhone o baixa numa requisição à
+	# parte, sem as credenciais do site. Só estes arquivos; nada de dados.
+	@icones path /apple-touch-icon.png /apple-touch-icon-precomposed.png /favicon.ico /assets/manifest.webmanifest /assets/icones/apple-touch-icon.png /assets/icones/icone-192.png /assets/icones/icone-512.png /assets/icones/icone-maskable-512.png /assets/icones/favicon-32.png /assets/icones/favicon.svg
+	handle @icones {
+		reverse_proxy finlab:8777
 	}
 
-	reverse_proxy finlab:8777
+	handle {
+		basic_auth {
+			{$FINLAB_USUARIO} {$FINLAB_SENHA_HASH}
+		}
+		reverse_proxy finlab:8777
+	}
 }
