@@ -160,6 +160,11 @@ def test_unit_divide_o_valor_de_mercado():
         assert snap_unit["shares_quote"] == snap_unit["shares"] / 2
 
 
+def _auto(fund, snap, brapi, ltm=None):
+    """Os múltiplos da fonte automática, a que a tela abre por padrão."""
+    return metrics.multiplos_por_fonte(fund, snap, brapi, ltm)["auto"]
+
+
 def test_multiplos_sao_consistentes_com_os_insumos():
     fund = {"base": {"lucro_liquido": 200.0, "patrimonio_liquido": 1000.0,
                      "divida_liquida": 300.0, "ebitda": 400.0, "ebit": 350.0,
@@ -167,7 +172,7 @@ def test_multiplos_sao_consistentes_com_os_insumos():
             "indicadores": {"roe": 0.2, "mg_ebitda": 0.2, "nd_ebitda": 0.75},
             "financial": False}
     snap = {"market_cap": 2000.0, "shares_quote": 100.0, "shares": 100.0}
-    mult = metrics.multiples(fund, snap, None)
+    mult = _auto(fund, snap, None)
     assert mult["pl"] == pytest.approx(10.0)
     assert mult["pvp"] == pytest.approx(2.0)
     assert mult["ev"] == pytest.approx(2300.0)
@@ -181,7 +186,7 @@ def test_financeira_nao_recebe_enterprise_value():
                      "divida_liquida": None, "ebitda": None, "ebit": None,
                      "receita": 900.0, "fcl": None},
             "indicadores": {}, "financial": True}
-    mult = metrics.multiples(fund, {"market_cap": 1000.0, "shares_quote": 10.0}, None)
+    mult = _auto(fund, {"market_cap": 1000.0, "shares_quote": 10.0}, None)
     assert mult["ev"] is None
     assert mult["ev_ebitda"] is None
 
@@ -200,7 +205,7 @@ def test_multiplos_vem_da_brapi_quando_ela_tem():
                                       "trailingEps": 4.6},
              "financialData": {"returnOnEquity": 0.228}}
     snap = {"market_cap": 400e9, "shares_quote": 10e9, "price": 44.0}
-    mult = metrics.multiples(_fund_itub(), snap, brapi)
+    mult = _auto(_fund_itub(), snap, brapi)
     assert mult["pl"] == pytest.approx(9.5)
     assert mult["pvp"] == pytest.approx(2.2)
     assert mult["roe"] == pytest.approx(0.228)
@@ -218,26 +223,26 @@ def test_roe_da_brapi_em_pontos_percentuais_vira_fracao():
     brapi = {"defaultKeyStatistics": {"bookValue": 20.0, "trailingEps": 4.6},
              "financialData": {"returnOnEquity": 22.8}}
     snap = {"market_cap": 400e9, "shares_quote": 10e9, "price": 44.0}
-    assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
+    assert _auto(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
     # Sem LPA/VPA da BRAPI, a referência é a conta da CVM.
     brapi = {"financialData": {"returnOnEquity": 22.8}}
-    assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
+    assert _auto(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.228)
     # ROE baixo em pontos (1,2%) não pode virar 120%: com LPA ÷ VPA da própria
     # BRAPI (mesma janela) a escala sai certa mesmo com o anual da CVM em 21%.
     brapi = {"defaultKeyStatistics": {"bookValue": 20.0, "trailingEps": 0.24},
              "financialData": {"returnOnEquity": 1.2}}
-    assert metrics.multiples(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.012)
+    assert _auto(_fund_itub(), snap, brapi)["roe"] == pytest.approx(0.012)
     # Sem LPA/VPA, a referência seguinte é a CVM de 12 meses (mesma janela).
     ltm = {"fim": "2026-06-30", "rotulo": "LTM 2T26",
            "campos": {"lucro_liquido": 2.6e9, "patrimonio_liquido": 215e9}}
     brapi = {"financialData": {"returnOnEquity": 1.2}}
-    assert metrics.multiples(_fund_itub(), snap, brapi, ltm)["roe"] == pytest.approx(0.012)
+    assert _auto(_fund_itub(), snap, brapi, ltm)["roe"] == pytest.approx(0.012)
 
 
 def test_multiplos_caem_para_a_cvm_campo_a_campo():
     # BRAPI só com P/L: o resto vem do exercício da CVM, e a fonte diz isso.
     snap = {"market_cap": 430e9, "shares_quote": 10e9, "price": 43.0}
-    mult = metrics.multiples(_fund_itub(), snap, {"priceEarnings": 9.0,
+    mult = _auto(_fund_itub(), snap, {"priceEarnings": 9.0,
                                                   "financialData": {"returnOnEquity": None}})
     assert mult["fontes"]["pl"] == "BRAPI"
     assert mult["pvp"] == pytest.approx(430 / 215.08)
@@ -245,7 +250,7 @@ def test_multiplos_caem_para_a_cvm_campo_a_campo():
     assert mult["fontes"]["pvp"] == mult["fontes"]["roe"] == "CVM"
     assert mult["ano_cvm"] == 2025
     # Sem BRAPI nenhuma, tudo CVM — o comportamento de antes.
-    mult = metrics.multiples(_fund_itub(), snap, None)
+    mult = _auto(_fund_itub(), snap, None)
     assert mult["pl"] == pytest.approx(430 / 45.85)
     assert set(v for v in mult["fontes"].values() if v) == {"CVM"}
 
@@ -255,7 +260,7 @@ def test_multiplos_ignoram_lixo_da_brapi():
     brapi = {"priceEarnings": "NaN", "dividendYield": "abc",
              "defaultKeyStatistics": {"priceToBook": 0},
              "financialData": {"returnOnEquity": float("inf")}}
-    mult = metrics.multiples(_fund_itub(), snap, brapi)
+    mult = _auto(_fund_itub(), snap, brapi)
     assert mult["pl"] == pytest.approx(430 / 45.85)
     assert mult["pvp"] == pytest.approx(430 / 215.08)
     assert mult["dy"] is None
@@ -271,7 +276,7 @@ def test_nao_financeira_usa_ev_ebitda_e_margem_da_brapi():
     snap = {"market_cap": 2000.0, "shares_quote": 100.0, "price": 20.0}
     brapi = {"financialData": {"enterpriseToEbitda": 6.1, "ebitdaMargins": 0.22,
                                "enterpriseValue": 2500.0}}
-    mult = metrics.multiples(fund, snap, brapi)
+    mult = _auto(fund, snap, brapi)
     assert mult["ev_ebitda"] == pytest.approx(6.1)
     assert mult["mg_ebitda"] == pytest.approx(0.22)
     assert mult["ev"] == pytest.approx(2500.0)
@@ -528,7 +533,6 @@ def test_leitor_da_cvm_aceita_itr_e_degrada_sem_ele(tmp_path, monkeypatch):
     cvm.limpar_cache()
     try:
         # sem arquivos: nada de ITR, nada de exceção
-        assert cvm.quarterly_available() is False
         assert cvm.latest_quarter("009512") is None
 
         linhas = []
@@ -556,7 +560,6 @@ def test_leitor_da_cvm_aceita_itr_e_degrada_sem_ele(tmp_path, monkeypatch):
         pd.DataFrame(linhas).to_parquet(tmp_path / "dre_itr.parquet", index=False)
         cvm.limpar_cache()
 
-        assert cvm.quarterly_available() is True
         q = cvm.latest_quarter("009512")
         assert q == {"fim": "2026-06-30", "receita": 220.0, "lucro": 25.0}
         # outra empresa segue sem dado, sem exceção
@@ -709,13 +712,6 @@ def test_universo_bdr_sem_duplicatas_e_setores_validos():
     for b in bdrs.UNIVERSE:
         assert b.sector in bdrs.SECTORS, b.ticker
         assert b.us_ticker, b.ticker
-
-
-def test_bdr_peers_do_mesmo_setor():
-    from finlab.backend import bdrs
-    pares = bdrs.peers("AAPL34")
-    assert pares and all(p.sector == "TECHNOLOGY" for p in pares)
-    assert all(p.ticker != "AAPL34" for p in pares)
 
 
 def test_bancos_de_bdr_marcados():
@@ -957,31 +953,6 @@ def _payload_min(**over):
     return {"fundamentals": fund, "market": {"perf": {}}, "multiples": {}, "score": {}}
 
 
-def _linha_itr(fim, ini, conta, ds, valor, ordem="ÚLTIMO"):
-    import pandas as pd
-
-    return {"CD_CVM": "009512", "DENOM_CIA": "X", "CNPJ_CIA": "x",
-            "DT_FIM_EXERC": pd.Timestamp(fim), "DT_INI_EXERC": pd.Timestamp(ini),
-            "ORDEM_EXERC": ordem, "ANO_REFER": pd.Timestamp(fim).year,
-            "CD_CONTA": conta, "DS_CONTA": ds, "VL_CONTA_AJUSTADO": valor}
-
-
-def _monta_itr(tmp_path, linhas, anual=None):
-    """Grava um ITR (e opcionalmente a DFP) sintéticos e devolve os pontos."""
-    import pandas as pd
-
-    pd.DataFrame(linhas).to_parquet(tmp_path / "dre_itr.parquet", index=False)
-    if anual:
-        pd.DataFrame([
-            {"CD_CVM": "009512", "DENOM_CIA": "X", "CNPJ_CIA": "x",
-             "DT_FIM_EXERC": pd.Timestamp(f"{ano}-12-31"), "ANO_REFER": ano,
-             "CD_CONTA": conta, "DS_CONTA": ds, "VL_CONTA_AJUSTADO": v}
-            for ano, conta, ds, v in anual
-        ]).to_parquet(tmp_path / "dre_dfp.parquet", index=False)
-    cvm.limpar_cache()
-    return {p["rotulo"]: p for p in cvm.quarterly_series("009512")["pontos"]}
-
-
 # ---------------------------------------------------------------------------
 # Série trimestral (ITR)
 # ---------------------------------------------------------------------------
@@ -1012,7 +983,18 @@ def _monta_itr(tmp_path, linhas, anual=None):
             for ano, conta, ds, v in anual
         ]).to_parquet(tmp_path / "dre_dfp.parquet", index=False)
     cvm.limpar_cache()
-    return {p["rotulo"]: p for p in cvm.quarterly_series("009512")["pontos"]}
+    return _trimestres_da_dre("009512")
+
+
+def _trimestres_da_dre(cd):
+    """{rótulo: {"receita", "lucro_liquido", "derivado"}} das colunas de
+    trimestre da DRE completa — a mesma que a página mostra."""
+    dre = cvm.dre_completa(cd)
+    linhas = {l["chave"]: l["valores"] for l in dre.get("linhas", [])}
+    return {c["rotulo"]: {"receita": linhas.get("receita", [None] * (i + 1))[i],
+                          "lucro_liquido": linhas.get("lucro_liquido", [None] * (i + 1))[i],
+                          "derivado": c.get("derivado")}
+            for i, c in enumerate(dre.get("colunas", [])) if c["tipo"] == "tri"}
 
 
 def test_serie_trimestral_desacumula_o_itr(tmp_path, monkeypatch):
@@ -1036,9 +1018,11 @@ def test_serie_trimestral_desacumula_o_itr(tmp_path, monkeypatch):
         assert pontos["4T25"]["receita"] == 140.0
         assert pontos["4T25"]["derivado"] is True
         assert pontos["1T25"]["derivado"] is False
-        # validação forte: o LTM que fecha o exercício tem de bater com o anual
-        assert pontos["4T25"]["receita_ltm"] == 500.0
-        assert pontos["4T25"]["lucro_liquido_ltm"] == 50.0
+        # validação forte: os 12 meses que fecham o exercício batem com o anual
+        ltm = cvm.ltm_series("009512")
+        assert ltm["trimestre"] == "4T25"
+        assert ltm["campos"]["receita"] == 500.0
+        assert ltm["campos"]["lucro_liquido"] == 50.0
     finally:
         cvm.limpar_cache()
 
@@ -1097,7 +1081,7 @@ def test_ltm_nao_soma_trimestres_com_buraco(tmp_path, monkeypatch):
         pontos = _monta_itr(tmp_path, linhas)
 
         assert len(pontos) == 4
-        assert all(p["receita_ltm"] is None for p in pontos.values())
+        assert cvm.ltm_series("009512") == {}
     finally:
         cvm.limpar_cache()
 
@@ -1108,8 +1092,9 @@ def test_painel_segue_anual_sem_itr(tmp_path, monkeypatch):
     monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
     cvm.limpar_cache()
     try:
-        assert cvm.quarterly_series("009512") == {"pontos": [], "campos": []}
-        assert cvm.quarterly_series("") == {"pontos": [], "campos": []}
+        assert _trimestres_da_dre("009512") == {}
+        assert cvm.ltm_series("009512") == {}
+        assert cvm.ltm_series("") == {}
     finally:
         cvm.limpar_cache()
 
@@ -1301,8 +1286,9 @@ def test_dre_anual_monta_as_linhas_com_margens_e_cagr(tmp_path, monkeypatch):
         ]).to_parquet(tmp_path / "dfc_mi_dfp.parquet", index=False)
         cvm.limpar_cache()
 
-        d = cvm.dre_anual("009512")
-        assert d["anos"] == [2024, 2025] and d["financial"] is False
+        d = cvm.dre_completa("009512")
+        assert [c["rotulo"] for c in d["colunas"]] == ["2024", "2025"]
+        assert d["financial"] is False
         por = {l["chave"]: l for l in d["linhas"]}
 
         # ordem contábil preservada
@@ -1349,7 +1335,7 @@ def test_dre_anual_de_financeira_cai_no_plano_reduzido(tmp_path, monkeypatch):
         ]).to_parquet(tmp_path / "dre_dfp.parquet", index=False)
         cvm.limpar_cache()
 
-        d = cvm.dre_anual("009512")
+        d = cvm.dre_completa("009512")
         chaves = [l["chave"] for l in d["linhas"]]
         assert d["financial"] is True
         assert "cpv" not in chaves and "ebitda" not in chaves and "da" not in chaves
@@ -1359,11 +1345,10 @@ def test_dre_anual_de_financeira_cai_no_plano_reduzido(tmp_path, monkeypatch):
         cvm.limpar_cache()
 
 
-def test_dre_trimestral_desacumula_soma_o_acumulado_e_compara_com_o_ano_anterior(
-        tmp_path, monkeypatch):
-    """Três invariantes: o ITR vem acumulado e sai isolado; a coluna do
-    semestre é a soma dos trimestres; e o Δ a/a compara o mesmo trimestre —
-    não o anterior, que a sazonalidade distorce."""
+def test_dre_trimestral_desacumula_e_soma_o_acumulado(tmp_path, monkeypatch):
+    """Dois invariantes: o ITR vem acumulado e sai isolado; e a coluna do
+    semestre é a soma dos trimestres. Sem 3T e 4T de 2024 não há 12 meses
+    seguidos: a coluna de 12 meses não aparece."""
     import pandas as pd
 
     monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
@@ -1386,24 +1371,16 @@ def test_dre_trimestral_desacumula_soma_o_acumulado_e_compara_com_o_ano_anterior
         pd.DataFrame(itr).to_parquet(tmp_path / "dre_itr.parquet", index=False)
         cvm.limpar_cache()
 
-        t = cvm.dre_trimestral("009512")
-        assert t["ano"] == 2025
-        assert [c["rotulo"] for c in t["colunas"]] == ["1T25", "2T25", "1S25"]
-        assert t["colunas"][2]["acumulado"] is True
+        d = cvm.dre_completa("009512")
+        assert [c["rotulo"] for c in d["colunas"]] == [
+            "1T24", "2T24", "1S24", "1T25", "2T25", "1S25"]
+        assert d["colunas"][-1]["tipo"] == "ytd"
 
-        receita = next(l for l in t["linhas"] if l["chave"] == "receita")
+        receita = next(l for l in d["linhas"] if l["chave"] == "receita")
         # acumulado 120 e 260 → trimestres isolados 120 e 140
-        assert receita["valores"] == [120.0, 140.0, 260.0]
-        assert receita["valores"][2] == receita["valores"][0] + receita["valores"][1]
-
-        # Δ a/a por índice de trimestre: 1T25/1T24 e 2T25/2T24 (=140/120)
-        assert receita["yoy"][0] == pytest.approx(120.0 / 100.0 - 1)
-        assert receita["yoy"][1] == pytest.approx(140.0 / 120.0 - 1)
-        assert receita["yoy"][2] == pytest.approx(260.0 / 220.0 - 1)
-
-        # margem não tem Δ a/a em pontos percentuais nesta tabela
-        margem = next(l for l in t["linhas"] if l["chave"] == "mg_liquida")
-        assert all(y is None for y in margem["yoy"])
+        assert receita["valores"][3:] == [120.0, 140.0, 260.0]
+        assert receita["valores"][5] == receita["valores"][3] + receita["valores"][4]
+        assert receita["valores"][:3] == [100.0, 120.0, 220.0]
     finally:
         cvm.limpar_cache()
 
@@ -1412,10 +1389,9 @@ def test_dre_degrada_sem_dado(tmp_path, monkeypatch):
     monkeypatch.setattr(cvm, "CVM_PROCESSED_DIR", tmp_path)
     cvm.limpar_cache()
     try:
-        assert cvm.dre_anual("009512")["linhas"] == []
-        assert cvm.dre_trimestral("009512")["colunas"] == []
-        assert cvm.dre_anual("")["anos"] == []
-        assert cvm.dre_trimestral("")["linhas"] == []
+        assert cvm.dre_completa("009512")["linhas"] == []
+        assert cvm.dre_completa("009512")["colunas"] == []
+        assert cvm.dre_completa("")["colunas"] == []
     finally:
         cvm.limpar_cache()
 

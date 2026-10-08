@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import os
 import threading
 from bisect import bisect_right
@@ -223,61 +222,6 @@ def _pt_number(txt: str) -> Optional[float]:
     except ValueError:
         return None
 
-
-def yield_curve() -> dict:
-    """Curva de juros do Tesouro (ANBIMA), base do custo de capital.
-
-    Para um DCF com perpetuidade, a taxa livre de risco relevante é a de
-    prazo longo, não a Selic overnight. Devolvemos as duas, mais a NTN-B
-    real e a inflação implícita, para que a escolha fique explícita na tela.
-    Taxas em % a.a.
-    """
-    def build():
-        rows = _pulse_csv("anbima_titulos_publicos.csv", TTL_MACRO)
-        if not rows:
-            return {}
-        ref = max(r.get("data_referencia") or "" for r in rows)
-        out: dict[str, Optional[float]] = {"data": ref}
-
-        def escolhe(titulo: str, anos_alvo: int) -> Optional[tuple[str, float]]:
-            alvo = date.today().year + anos_alvo
-            cand = []
-            for r in rows:
-                if r.get("titulo") != titulo or r.get("data_referencia") != ref:
-                    continue
-                venc = (r.get("data_vencimento") or "")[:4]
-                try:
-                    taxa = float(r.get("tx_indicativa"))
-                    ano = int(venc)
-                except (TypeError, ValueError):
-                    continue
-                cand.append((abs(ano - alvo), ano, taxa))
-            if not cand:
-                return None
-            cand.sort()
-            return (str(cand[0][1]), cand[0][2])
-
-        pre = escolhe("NTN-F", 10)
-        real = escolhe("NTN-B", 10)
-        real_longa = escolhe("NTN-B", 25)
-
-        if pre:
-            out["prefixado_10a"] = round(pre[1], 4)
-            out["prefixado_venc"] = pre[0]
-        if real:
-            out["ntnb_10a"] = round(real[1], 4)
-            out["ntnb_venc"] = real[0]
-        if real_longa:
-            out["ntnb_longa"] = round(real_longa[1], 4)
-        if pre and real:
-            implicita = ((1 + pre[1] / 100) / (1 + real[1] / 100) - 1) * 100
-            out["inflacao_implicita"] = round(implicita, 4)
-        return out
-
-    try:
-        return cache.memoize("curva:v1", TTL_MACRO, build) or {}
-    except Exception:
-        return {}
 
 
 def pulse_ipca_12m() -> Optional[float]:
@@ -650,15 +594,6 @@ def macro() -> dict:
         ipca12 = pulse_ipca_12m()
         if ipca12 is not None:
             data["ipca"] = {"value": ipca12, "source": "BCB · acumulado 12m"}
-
-        curva = yield_curve()
-        for chave, rotulo in (("prefixado_10a", "NTN-F ~10 anos"),
-                              ("ntnb_10a", "NTN-B ~10 anos (real)"),
-                              ("ntnb_longa", "NTN-B longa (real)"),
-                              ("inflacao_implicita", "inflação implícita")):
-            if curva.get(chave) is not None:
-                data[chave] = {"value": curva[chave], "source": "ANBIMA · " + rotulo,
-                               "date": curva.get("data")}
 
         if BRAPI_TOKEN:
             for key, path in (("selic", "prime-rate"), ("ipca", "inflation")):

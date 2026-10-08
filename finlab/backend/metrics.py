@@ -413,7 +413,3 @@ def multiplos_por_fonte(fund: dict, snap: dict, brapi: Optional[dict],
     }
 
 
-def multiples(fund: dict, snap: dict, brapi: Optional[dict],
-              ltm: Optional[dict] = None) -> dict:
-    """Os múltiplos da fonte automática (ver `multiplos_por_fonte`)."""
-    return multiplos_por_fonte(fund, snap, brapi, ltm)["auto"]
