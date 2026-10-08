@@ -10,6 +10,9 @@ echo "-> atualizando as demonstrações da CVM (pode levar alguns minutos)"
 docker compose exec -T finlab sh -c \
     'cd /app/valuation_cvm && python -m src.main --start-year 2016 --end-year $(date +%Y)'
 
+echo "-> pré-calculando os fundamentos com os dados novos"
+docker compose exec -T finlab python -m finlab.backend.tarefas gerar-fundamentos
+
 echo "-> limpando o cache do painel para os números novos aparecerem"
 # O cache vive em disco (volume) e sobrevive ao restart: sem limpar, os
 # fundamentos e os 12 meses seguiriam os velhos por até 24 h.

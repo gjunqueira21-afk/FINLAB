@@ -3,6 +3,7 @@
     python -m finlab.backend.tarefas atualizar-carteiras
     python -m finlab.backend.tarefas atualizar-carteiras --lamina
     python -m finlab.backend.tarefas conferir-trimestres [TICKER ...]
+    python -m finlab.backend.tarefas gerar-fundamentos [--se-preciso]
 
 Só o que roda SEM chave de API entra aqui: as chaves dos provedores de LLM
 vivem no navegador do usuário e nunca ficam no servidor, então o cron
@@ -70,7 +71,26 @@ def main() -> None:
                        help="Confere ITR, 12 meses e Dív.Líq/EBITDA de todas as ações.")
     c.add_argument("tickers", nargs="*", help="Só estes tickers (padrão: todos).")
 
+    g = sub.add_parser("gerar-fundamentos",
+                       help="Pré-calcula os fundamentos da CVM em data/fundamentos.json.")
+    g.add_argument("--se-preciso", action="store_true",
+                   help="Só gera se o arquivo não existir ou não bater com os dados da CVM.")
+
     args = parser.parse_args()
+    if args.tarefa == "gerar-fundamentos":
+        from . import cvm, snapshot
+        if args.se_preciso and not snapshot.precisa_gerar():
+            print("fundamentos pré-calculados já estão em dia.")
+            sys.exit(0)
+        if not cvm.available():
+            print("sem demonstrações da CVM processadas — rode o pipeline antes.")
+            sys.exit(1)
+        import time
+        t = time.time()
+        dados = snapshot.gerar()
+        print(f"fundamentos de {len(dados['empresas'])} ações gravados em "
+              f"{snapshot.ARQUIVO} ({time.time() - t:.0f} s).")
+        sys.exit(0)
     if args.tarefa == "atualizar-carteiras":
         sys.exit(_atualizar_carteiras(args.lamina))
     if args.tarefa == "conferir-trimestres":

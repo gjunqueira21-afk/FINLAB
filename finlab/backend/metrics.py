@@ -187,11 +187,15 @@ def market_snapshot(ticker: str, series: list[tuple[str, float]],
     shares_source = None
     if brapi and brapi.get("sharesOutstanding"):
         shares, shares_source = float(brapi["sharesOutstanding"]), "BRAPI"
+    # Do arquivo pré-calculado quando existe (não abre a CVM); senão, direto.
+    acoes_cvm = fund.get("acoes_cvm")
     if not shares:
-        shares = cvm.shares_outstanding(fund.get("cnpj"))
+        shares = (acoes_cvm["capital"] if acoes_cvm is not None
+                  else cvm.shares_outstanding(fund.get("cnpj")))
         shares_source = "capital social CVM" if shares else None
     if not shares:
-        shares = cvm.shares_from_eps(fund.get("cd_cvm"))
+        shares = (acoes_cvm["lpa"] if acoes_cvm is not None
+                  else cvm.shares_from_eps(fund.get("cd_cvm")))
         shares_source = "implícito no LPA (CVM)" if shares else None
 
     ratio = universe.unit_ratio(ticker)

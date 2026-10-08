@@ -34,3 +34,4 @@ valuation_cvm/data/raw/docs/
 deploy/.env
 deploy/.env.bak
 .superpowers/
+finlab/data/fundamentos.json

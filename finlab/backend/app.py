@@ -11,14 +11,17 @@ import json
 import logging
 import math
 import statistics
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from fastapi import Body, FastAPI, HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import carteiras  # noqa: F401  (rotas abaixo)
-from . import b3data, bdrs, cache, cvm, divida, etfs, market, metrics, scoring, universe
+from . import (b3data, bdrs, cache, cvm, divida, etfs, market, metrics, scoring,
+               snapshot, universe)
 from .settings import DEMO_MODE, TTL_CVM, TTL_QUOTE, WEB_DIR
 
 _log = logging.getLogger("finlab")
@@ -59,8 +62,24 @@ class JSONSeguro(JSONResponse):
                           separators=(",", ":")).encode("utf-8")
 
 
+@asynccontextmanager
+async def _ciclo_de_vida(_app):
+    """Ao subir, confere se os fundamentos pré-calculados batem com a CVM no
+    disco; se não, manda refazer num processo à parte (o painel responde
+    calculando direto enquanto isso)."""
+    try:
+        if snapshot.precisa_gerar():
+            snapshot.gerar_em_segundo_plano()
+    except Exception:  # nunca impede o painel de subir
+        _log.exception("checagem dos fundamentos pré-calculados falhou")
+    yield
+
+
 app = FastAPI(title="FinLab", version="2.0", docs_url="/api/docs",
-              default_response_class=JSONSeguro)
+              default_response_class=JSONSeguro, lifespan=_ciclo_de_vida)
+# Compressão: a tela principal manda ~300 KB de JSON (90 ações × 3 fontes de
+# múltiplos); comprimido, isso vira uma fração — o que mais pesa no celular.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.middleware("http")
@@ -85,6 +104,11 @@ async def _sem_cache_heuristico(request, call_next):
 # ---------------------------------------------------------------------------
 
 def _fundamentals(ticker: str) -> dict:
+    # Do arquivo pré-calculado quando ele bate com a CVM no disco (o normal);
+    # o cálculo direto abaixo é o caminho de quando ele ainda não existe.
+    pronto = snapshot.empresa(ticker)
+    if pronto is not None and pronto.get("fund"):
+        return pronto["fund"]
     # A versão na chave sobe SEMPRE que o formato do payload muda. O cache vive
     # em disco com TTL de 24 h: sem o bump, quem der git pull passa um dia
     # inteiro vendo o painel novo alimentado pelo blob antigo.
@@ -98,6 +122,9 @@ def _ltm(cd_cvm: Optional[str]) -> dict:
     a tela principal pede os 90 de uma vez, e o ITR só muda com o pipeline."""
     if not cd_cvm:
         return {}
+    pronto = snapshot.por_cd(cd_cvm)
+    if pronto is not None:
+        return pronto.get("ltm") or {}
     # v4: todas as contas na janela do último trimestre, saldo mais novo entre
     # ITR e DFP e a despesa financeira (cobertura de juros em 12 meses).
     # Vazio (ITR ainda não processado) não vai para o cache: senão o painel
@@ -183,7 +210,8 @@ def _overview_rows() -> dict:
         }
 
     # v8: sai o EPV ("valor") da linha — o V2 não faz valuation.
-    return _com_diagnostico(cache.memoize("overview:v8", TTL_QUOTE, build) or {"rows": []})
+    # swr: com o cache vencido, entrega o anterior na hora e refaz por trás.
+    return _com_diagnostico(cache.memoize_swr("overview:v8", TTL_QUOTE, build) or {"rows": []})
 
 
 def _com_diagnostico(payload: dict) -> dict:
@@ -361,6 +389,7 @@ def api_company(ticker: str):
     if not fund:
         raise HTTPException(status_code=404, detail=f"Sem dados para {ticker}")
 
+    pronto = snapshot.empresa(ticker)
     series = market.price_series([ticker]).get(ticker, [])
     brapi = market.brapi_fundamentals(ticker) or market.brapi_quotes([ticker]).get(ticker)
     snap = metrics.market_snapshot(ticker, series, brapi, fund)
@@ -381,11 +410,11 @@ def api_company(ticker: str):
         "sector_label": universe.SECTORS[comp.sector]["label"],
         "price_series": [{"d": d, "p": p} for d, p in series[-500:]],
         "consenso": _consenso(brapi),
-        "itr": cvm.latest_quarter(comp.cd_cvm),
+        "itr": pronto["itr"] if pronto else cvm.latest_quarter(comp.cd_cvm),
         "ltm": ltm,
         # A DRE inteira numa grade: exercícios, trimestres de cada um (a tela
         # abre o ano clicado), o ano em curso e os últimos 12 meses.
-        "dre": {"completa": cvm.dre_completa(comp.cd_cvm)},
+        "dre": {"completa": pronto["dre"] if pronto else cvm.dre_completa(comp.cd_cvm)},
         "source": snap.get("price_source"),
     }
 
@@ -552,7 +581,7 @@ def _etf_rows() -> dict:
         # Mais líquidos primeiro dentro de cada categoria.
         rows.sort(key=lambda r: -(r["liquidez"] or 0))
         return {"rows": rows, "categories": etfs.CATEGORIES}
-    return _com_diagnostico(cache.memoize("etfs:rows:v1", TTL_QUOTE, build) or {"rows": []})
+    return _com_diagnostico(cache.memoize_swr("etfs:rows:v1", TTL_QUOTE, build) or {"rows": []})
 
 
 @app.get("/api/etfs")
@@ -647,7 +676,7 @@ def _bdr_rows() -> dict:
             })
         rows.sort(key=lambda r: -(r["liquidez"] or 0))
         return {"rows": rows, "sectors": {k: v for k, v in bdrs.SECTORS.items()}}
-    saida = _com_diagnostico(cache.memoize("bdrs:rows:v1", TTL_QUOTE, build) or {"rows": []})
+    saida = _com_diagnostico(cache.memoize_swr("bdrs:rows:v1", TTL_QUOTE, build) or {"rows": []})
     saida["brapi"] = bool(market.BRAPI_TOKEN)
     return saida
 
@@ -790,12 +819,24 @@ def _consenso_bdr(info: dict, preco_bdr) -> dict:
 # Manutenção
 # ---------------------------------------------------------------------------
 
+# O que o botão ↻ Atualizar refaz: cotações e o que é montado com elas.
+# Fundamentos (CVM, Yahoo dos BDRs) ficam: só mudam com resultado novo, e
+# refazê-los a cada clique era o que deixava o botão lento.
+_CACHE_DE_MERCADO = ("brapi:quote", "brapi:fund", "brapi:mult", "overview", "etfs:rows",
+                     "bdrs:rows", "macro", "curva", "pulse", "probe", "b3:bdi")
+
+
 @app.post("/api/cache/clear")
-def api_cache_clear():
+def api_cache_clear(tudo: bool = False):
+    """Sem parâmetro: só o que vem do mercado. `?tudo=1`: tudo, inclusive o
+    cálculo direto da CVM em memória (manutenção)."""
+    if not tudo:
+        return {"ok": True, "escopo": "mercado",
+                "arquivos_removidos": cache.clear(_CACHE_DE_MERCADO)}
     removed = cache.clear()
     cvm.limpar_cache()
     cvm._shares_table.cache_clear()
-    return {"ok": True, "arquivos_removidos": removed}
+    return {"ok": True, "escopo": "tudo", "arquivos_removidos": removed}
 
 
 @app.get("/api/health")

@@ -16,5 +16,12 @@ if [ ! -f valuation_cvm/data/processed/dre_dfp.parquet ] \
     (cd valuation_cvm && python -m src.main --start-year 2016 --end-year "$ANO")
 fi
 
+# Fundamentos pré-calculados (data/fundamentos.json): refeitos só quando a
+# CVM no disco mudou ou o formato mudou. Feito ANTES do painel subir, num
+# processo que termina — a memória que o pandas usa para montar os números
+# volta ao sistema, e o painel nunca carrega a CVM inteira.
+python -m finlab.backend.tarefas gerar-fundamentos --se-preciso \
+    || echo "==> aviso: fundamentos pré-calculados não gerados; o painel calcula direto."
+
 echo "==> FinLab no ar (porta interna 8777; o proxy — Caddy ou Traefik — publica com HTTPS e senha)."
 exec python -m uvicorn finlab.backend.app:app --host 0.0.0.0 --port 8777

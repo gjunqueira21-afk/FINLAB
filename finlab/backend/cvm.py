@@ -137,7 +137,12 @@ def limpar_cache() -> None:
 
 
 def available() -> bool:
-    return any(not df.empty for df in _frames().values())
+    """Há demonstrações processadas? Olha os ARQUIVOS, sem carregá-los: o
+    teste de saúde do contêiner chama isto a cada 30 s, e abrir os parquets
+    aqui punha a CVM inteira na memória só para responder "sim"."""
+    return any((CVM_PROCESSED_DIR / f"{st}_dfp.parquet").is_file()
+               and (CVM_PROCESSED_DIR / f"{st}_dfp.parquet").stat().st_size > 0
+               for st in STATEMENTS)
 
 
 def quarterly_available() -> bool:
