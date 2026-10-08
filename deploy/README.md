@@ -42,7 +42,7 @@ Quando aparecer `FinLab no ar`, acesse `https://seu-dominio` e faça login.
 | Para… | Rode (em `FINLAB/deploy`) |
 |---|---|
 | Atualizar o código (depois de um PR aceito) | `bash atualizar.sh` |
-| Atualizar as demonstrações da CVM | `bash atualizar-dados.sh` |
+| Atualizar as demonstrações da CVM (também refaz os fundamentos pré-calculados) | `bash atualizar-dados.sh` |
 | Conferir trimestres e 12 meses das 90 ações | `docker compose exec finlab python -m finlab.backend.tarefas conferir-trimestres` |
 | Atualizar as carteiras acompanhadas (cota, alertas, lâminas) | `bash atualizar-carteiras.sh` |
 | Ver os logs | `docker compose logs -f finlab` |
@@ -126,3 +126,20 @@ confirmação antes de excluir carteira, tirar papel ou rebalancear.
 
 Se trocar a senha do painel (`trocar-senha.sh`), rode o `instalar-hermes.sh`
 de novo para o Hermes receber a nova.
+
+## Desempenho: fundamentos pré-calculados
+
+O painel não carrega mais a CVM inteira na memória. Tudo que vem da CVM para
+as ações do painel (séries anuais, 12 meses, DRE com trimestres) é calculado
+uma vez e gravado em `finlab/data/fundamentos.json` (volume `finlab_dados_app`):
+
+- ao subir o contêiner, se os dados da CVM mudaram desde o último cálculo;
+- no `atualizar-dados.sh`, logo depois de baixar as demonstrações novas.
+
+O cálculo roda num processo à parte, que devolve a memória ao terminar. Para
+refazer à mão: `docker compose exec finlab python -m finlab.backend.tarefas
+gerar-fundamentos`.
+
+O botão **↻ Atualizar** do painel busca só cotações novas; os fundamentos
+ficam como estão até a próxima atualização da CVM.
+

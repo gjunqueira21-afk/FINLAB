@@ -19,7 +19,9 @@ import csv
 import io
 import json
 import os
+import threading
 from bisect import bisect_right
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
 
@@ -36,6 +38,21 @@ HISTORY_FILE = DATA_DIR / "history.csv"
 
 _SESSION = requests.Session()
 _SESSION.headers.update({"User-Agent": "FinLab/1.0"})
+
+# Quantas consultas de rede ao mesmo tempo. Uma por vez, a tela principal
+# levava ~20 s para buscar o histórico das 90 ações (111 idas à BRAPI); com
+# 8 em paralelo, o mesmo trabalho cabe em poucos segundos sem martelar o
+# provedor.
+_PARALELO = max(1, int(os.getenv("FINLAB_PARALELO", "8")))
+
+
+def _em_paralelo(func, itens) -> list:
+    """`[func(i) for i in itens]`, com até _PARALELO chamadas simultâneas."""
+    itens = list(itens)
+    if len(itens) <= 1 or _PARALELO == 1:
+        return [func(i) for i in itens]
+    with ThreadPoolExecutor(max_workers=min(_PARALELO, len(itens))) as pool:
+        return list(pool.map(func, itens))
 
 
 # ---------------------------------------------------------------------------
@@ -329,24 +346,25 @@ def brapi_quotes(tickers: Iterable[str]) -> dict[str, dict]:
     tickers = [t.upper() for t in tickers]
     if not BRAPI_TOKEN or not tickers:
         return {}
-    out: dict[str, dict] = {}
-    for i in range(0, len(tickers), 10):
-        chunk = tickers[i:i + 10]
-        key = "brapi:quote:" + ",".join(chunk)
-
-        def fetch(chunk=chunk):
+    def lote(chunk: list[str]) -> list:
+        def fetch():
             r = _SESSION.get(f"{BRAPI_BASE}/quote/{','.join(chunk)}",
                              params={"token": BRAPI_TOKEN, "fundamental": "true"},
                              timeout=HTTP_TIMEOUT)
             r.raise_for_status()
             return r.json().get("results", [])
         try:
-            for item in cache.memoize(key, TTL_QUOTE, fetch) or []:
-                sym = str(item.get("symbol", "")).upper()
-                if sym:
-                    out[sym] = item
+            return cache.memoize("brapi:quote:" + ",".join(chunk), TTL_QUOTE, fetch) or []
         except Exception:
-            continue
+            return []
+
+    out: dict[str, dict] = {}
+    lotes = [tickers[i:i + 10] for i in range(0, len(tickers), 10)]
+    for itens in _em_paralelo(lote, lotes):
+        for item in itens:
+            sym = str(item.get("symbol", "")).upper()
+            if sym:
+                out[sym] = item
     return out
 
 
@@ -408,34 +426,37 @@ def brapi_multiplos(tickers: Iterable[str]) -> dict[str, dict]:
     tickers = [t.upper() for t in tickers]
     if not BRAPI_TOKEN or not tickers:
         return {}
-    out: dict[str, dict] = {}
-    for i in range(0, len(tickers), 10):
-        chunk = tickers[i:i + 10]
-        key = "brapi:mult:" + ",".join(chunk)
-
-        def fetch(chunk=chunk):
+    def lote(chunk: list[str]) -> dict:
+        def fetch():
             r = _SESSION.get(f"{BRAPI_BASE}/quote/{','.join(chunk)}",
                              params={"token": BRAPI_TOKEN, "fundamental": "true",
                                      "modules": "defaultKeyStatistics,financialData"},
                              timeout=HTTP_TIMEOUT)
             r.raise_for_status()
             return r.json().get("results", [])
+        achados: dict[str, dict] = {}
         try:
-            for item in cache.memoize(key, TTL_FUNDAMENTALS, fetch) or []:
+            for item in cache.memoize("brapi:mult:" + ",".join(chunk), TTL_FUNDAMENTALS,
+                                      fetch) or []:
                 sym = str(item.get("symbol", "")).upper()
                 if sym:
-                    out[sym] = item
+                    achados[sym] = item
         except requests.HTTPError as e:
             # Só recusa do plano (4xx) justifica tentar papel a papel; rede
             # fora do ar derrubaria as 10 consultas do mesmo jeito, e devagar.
             if e.response is None or not 400 <= e.response.status_code < 500:
-                continue
+                return achados
             for tk in chunk:
                 item = brapi_fundamentals(tk)
                 if item:
-                    out[tk] = item
+                    achados[tk] = item
         except Exception:
-            continue
+            pass
+        return achados
+
+    out: dict[str, dict] = {}
+    for parte in _em_paralelo(lote, [tickers[i:i + 10] for i in range(0, len(tickers), 10)]):
+        out.update(parte)
     return out
 
 
@@ -503,19 +524,47 @@ def _save_local_history(store: dict[str, dict[str, float]]) -> None:
             pass
 
 
-def merge_history(series_by_ticker: dict[str, list[tuple[str, float]]]) -> dict[str, list[tuple[str, float]]]:
-    """Funde o que veio do provedor com o histórico local e persiste a união."""
-    store = _load_local_history()
-    changed = False
-    for tk, series in series_by_ticker.items():
-        bucket = store.setdefault(tk, {})
-        for dt, px in series:
-            if bucket.get(dt) != px:
-                bucket[dt] = px
-                changed = True
-    if changed:
-        _save_local_history(store)
-    return {tk: sorted(vals.items()) for tk, vals in store.items()}
+# O histórico local fica em memória e só é relido do disco quando o arquivo
+# muda (outro processo, como o cron das carteiras, gravou). Antes ele era lido
+# e reordenado inteiro a cada página — dezenas de milhares de linhas para
+# mostrar uma empresa.
+_HIST: dict = {"store": None, "assinatura": None}
+_HIST_LOCK = threading.Lock()
+
+
+def _assinatura_historico():
+    try:
+        st = HISTORY_FILE.stat()
+        return (str(HISTORY_FILE), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (str(HISTORY_FILE), None, None)
+
+
+def merge_history(series_by_ticker: dict[str, list[tuple[str, float]]],
+                  so: Optional[Iterable[str]] = None) -> dict[str, list[tuple[str, float]]]:
+    """Funde o que veio do provedor com o histórico local e persiste a união.
+
+    `so` limita a resposta a esses tickers (o resto do histórico continua
+    gravado); sem ele, devolve tudo, como sempre.
+    """
+    with _HIST_LOCK:
+        assinatura = _assinatura_historico()
+        if _HIST["store"] is None or _HIST["assinatura"] != assinatura:
+            _HIST["store"] = _load_local_history()
+            _HIST["assinatura"] = assinatura
+        store = _HIST["store"]
+        changed = False
+        for tk, series in series_by_ticker.items():
+            bucket = store.setdefault(tk, {})
+            for dt, px in series:
+                if bucket.get(dt) != px:
+                    bucket[dt] = px
+                    changed = True
+        if changed:
+            _save_local_history(store)
+            _HIST["assinatura"] = _assinatura_historico()
+        alvo = store if so is None else {tk: store.get(tk) or {} for tk in so}
+        return {tk: sorted(vals.items()) for tk, vals in alvo.items() if vals}
 
 
 # ---------------------------------------------------------------------------
@@ -645,15 +694,13 @@ def price_series(tickers: list[str]) -> dict[str, list[tuple[str, float]]]:
     result: dict[str, list[tuple[str, float]]] = {}
 
     if BRAPI_TOKEN:
-        for tk in tickers:
-            hist = brapi_history(tk, "1y")
+        for tk, hist in zip(tickers, _em_paralelo(lambda t: brapi_history(t, "1y"), tickers)):
             if len(hist) > 20:
                 result[tk] = hist
 
     faltando = [t for t in tickers if t not in result]
     if faltando and _probe("yahoo"):
-        for tk in faltando:
-            hist = yahoo_history(tk, "2y")
+        for tk, hist in zip(faltando, _em_paralelo(lambda t: yahoo_history(t, "2y"), faltando)):
             if len(hist) > 20:
                 result[tk] = hist
 
@@ -669,7 +716,7 @@ def price_series(tickers: list[str]) -> dict[str, list[tuple[str, float]]]:
         else:
             result[tk] = extra
 
-    return merge_history(result)
+    return merge_history(result, so=tickers)
 
 
 def asset_series(tickers: list[str]) -> dict[str, list[tuple[str, float]]]:
@@ -683,15 +730,13 @@ def asset_series(tickers: list[str]) -> dict[str, list[tuple[str, float]]]:
     result: dict[str, list[tuple[str, float]]] = {}
 
     if BRAPI_TOKEN:
-        for tk in tickers:
-            hist = brapi_history(tk, "1y")
+        for tk, hist in zip(tickers, _em_paralelo(lambda t: brapi_history(t, "1y"), tickers)):
             if len(hist) > 20:
                 result[tk] = hist
 
     faltando = [t for t in tickers if t not in result]
     if faltando and _probe("yahoo"):
-        for tk in faltando:
-            hist = yahoo_history(tk, "2y")
+        for tk, hist in zip(faltando, _em_paralelo(lambda t: yahoo_history(t, "2y"), faltando)):
             if len(hist) > 20:
                 result[tk] = hist
 
@@ -707,7 +752,7 @@ def asset_series(tickers: list[str]) -> dict[str, list[tuple[str, float]]]:
         else:
             result[tk] = extra
 
-    return merge_history(result)
+    return merge_history(result, so=tickers)
 
 
 def source_label() -> str:

@@ -15,6 +15,7 @@ deploy/.env.bak
 
 # Caches e dados de execução: vivem nos volumes, não na imagem
 finlab/data/cache
+finlab/data/fundamentos.json
 finlab/data/history.csv
 finlab/data/promessas.json
 finlab/data/calls
