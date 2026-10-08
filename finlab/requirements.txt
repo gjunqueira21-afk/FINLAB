@@ -7,6 +7,8 @@ pyarrow>=14.0
 python-dotenv>=1.0
 # Fundamentos de BDRs (demonstrações do papel de origem, gratuito)
 yfinance>=0.2.40
+# Lâmina da carteira em PDF (precisa do Pango: libpango-1.0-0 no Debian/Ubuntu)
+weasyprint>=61
 
 # Testes: python -m pytest finlab/tests -q
 pytest>=8.0

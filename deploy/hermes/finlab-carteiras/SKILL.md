@@ -52,6 +52,7 @@ JSON
 | Atualizar todas | `POST /api/carteiras/atualizar-todas` |
 | Excluir | `DELETE /api/carteiras/{id}` |
 | Lâmina em Markdown (relatório da carteira) | `GET /api/carteiras/{id}/lamina.md` |
+| Lâmina em PDF (o mesmo relatório, diagramado) | `GET /api/carteiras/{id}/lamina.pdf` |
 | Tickers válidos: ações / BDRs / ETFs | `GET /api/universe`, `GET /api/bdrs`, `GET /api/etfs` |
 | Dados de uma empresa (múltiplos, nota de saúde) | `GET /api/company/{ticker}` |
 

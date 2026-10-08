@@ -372,6 +372,18 @@ def api_carteira_lamina(carteira_id: str):
                     media_type="text/markdown; charset=utf-8")
 
 
+@app.get("/api/carteiras/{carteira_id}/lamina.pdf")
+def api_carteira_lamina_pdf(carteira_id: str):
+    """A mesma lâmina, diagramada em PDF — baixa como arquivo."""
+    from urllib.parse import quote
+    from . import lamina_pdf
+    c = _carteira_ou_404(carteira_id)
+    nome = lamina_pdf.nome_do_arquivo(c)
+    return Response(content=lamina_pdf.gerar(c), media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{nome}"; filename*=UTF-8\'\'{quote(nome)}',
+        "Cache-Control": "no-store"})
+
+
 # ---------------------------------------------------------------------------
 # Empresa
 # ---------------------------------------------------------------------------
