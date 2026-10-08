@@ -50,8 +50,6 @@ TTL_FUNDAMENTALS = int(os.getenv("FINLAB_TTL_FUND", "43200"))  # fundamentos: 12
 TTL_MACRO = int(os.getenv("FINLAB_TTL_MACRO", "3600"))         # macro: 1 h
 TTL_CVM = int(os.getenv("FINLAB_TTL_CVM", "86400"))            # parquet CVM: 24 h
 
-HOST = os.getenv("FINLAB_HOST", "127.0.0.1")
-PORT = int(os.getenv("FINLAB_PORT", "8777"))
 
 # Premissas macro de fallback (usadas quando BCB/BRAPI estão indisponíveis).
 # Servem apenas como ponto de partida editável — a interface deixa explícito
@@ -61,8 +59,6 @@ FALLBACK_MACRO = {
     "ipca": 4.50,        # % a.a. (12 meses)
     "cdi": 14.90,        # % a.a.
     "usdbrl": 5.40,
-    "erp": 5.00,         # prêmio de risco de mercado (%)
-    "crp": 2.00,         # prêmio de risco Brasil / EMBI+ (%)
 }
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)

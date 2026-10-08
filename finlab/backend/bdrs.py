@@ -170,12 +170,6 @@ def get(ticker: str) -> Optional[Bdr]:
     return BY_TICKER.get(ticker.upper().strip())
 
 
-def peers(ticker: str) -> list[Bdr]:
-    bdr = get(ticker)
-    if not bdr:
-        return []
-    return [b for b in UNIVERSE if b.sector == bdr.sector and b.ticker != bdr.ticker]
-
 
 # ---------------------------------------------------------------------------
 # Fundamentos via Yahoo Finance (ticker de origem, gratuito)

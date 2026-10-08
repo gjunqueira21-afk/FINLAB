@@ -5,8 +5,7 @@ Uso:
     python -m src.main --start-year 2019 --end-year 2026
     python -m src.main --start-year 2019 --end-year 2026 --force-download
     python -m src.main --start-year 2019 --end-year 2026 --company-query PETROBRAS
-    python -m src.main --example
-"""
+  """
 
 import argparse
 from typing import List
@@ -68,66 +67,6 @@ def process_and_save_statements(years: List[int]) -> None:
 
             df_clean = clean_statement(df_raw)
             _save_df(df_clean, stmt.lower(), tipo_doc.lower())
-
-
-def process_and_save_ipe(years: List[int]) -> None:
-    """Consolida o índice IPE dos anos pedidos num parquet único.
-
-    O IPE não segue o formato dos demonstrativos: é um CSV por ano, uma linha
-    por documento entregue à CVM, com Link_Download apontando para o PDF no
-    RAD/ENET. Aqui só o índice é guardado — o texto dos PDFs é outra etapa,
-    e o índice sozinho já responde "o que aconteceu nesta empresa desde o
-    balanço", com data e link.
-    """
-    import io
-    import zipfile
-
-    from .config import CSV_ENCODING, CSV_SEP, RAW_DIR
-
-    partes = []
-    for ano in years:
-        zip_path = RAW_DIR / f"ipe_cia_aberta_{ano}.zip"
-        if not zip_path.exists():
-            logger.debug("[IPE %d] ZIP ausente — pulando.", ano)
-            continue
-        try:
-            with zipfile.ZipFile(zip_path) as zf:
-                nomes = [n for n in zf.namelist() if n.lower().endswith(".csv")]
-                if not nomes:
-                    logger.warning("[IPE %d] ZIP sem CSV dentro.", ano)
-                    continue
-                with zf.open(nomes[0]) as fh:
-                    bruto = fh.read()
-            df = pd.read_csv(io.BytesIO(bruto), sep=CSV_SEP, encoding=CSV_ENCODING,
-                             dtype=str, low_memory=False)
-            partes.append(df)
-            logger.info("[IPE %d] %d documentos.", ano, len(df))
-        except Exception as exc:
-            logger.error("[IPE %d] Falha ao ler: %s", ano, exc)
-
-    if not partes:
-        logger.warning("IPE: nenhum ano disponível — o painel segue sem o índice.")
-        return
-
-    df = pd.concat(partes, ignore_index=True)
-    if "Codigo_CVM" in df.columns:
-        df["Codigo_CVM"] = df["Codigo_CVM"].astype(str).str.strip()
-    for col in ("Data_Entrega", "Data_Referencia"):
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
-
-    # Reapresentação: a CVM republica o mesmo protocolo com Versao maior. Fica
-    # a última — senão o painel mostra o mesmo fato relevante três vezes.
-    if {"Protocolo_Entrega", "Versao"} <= set(df.columns):
-        df["Versao"] = pd.to_numeric(df["Versao"], errors="coerce").fillna(0)
-        df = (df.sort_values("Versao")
-                .drop_duplicates(subset=["Protocolo_Entrega"], keep="last"))
-
-    destino = PROCESSED_DIR / "ipe.parquet"
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(destino, index=False)
-    logger.info("Salvo: ipe.parquet (%d documentos, %d companhias)",
-                len(df), df["Codigo_CVM"].nunique() if "Codigo_CVM" in df.columns else 0)
 
 
 def process_and_save_cadastro() -> pd.DataFrame:
@@ -223,43 +162,6 @@ def _print_snapshot(m: dict) -> None:
     print(f"  {'ROIC (aprox):':<30} {fmt_pct(m.get('roic_aprox'))}")
 
 
-def run_example() -> None:
-    """Mostra exemplo de uso do módulo de valuation."""
-    print("\n" + "="*60)
-    print("EXEMPLO: Cálculo de EPV com dados hipotéticos")
-    print("="*60)
-
-    from .valuation_epv import epv_from_ebit_series
-    from .valuation_dcf import calculate_dcf
-
-    ebit_historico = [5_000_000, 5_500_000, 4_800_000, 6_000_000, 5_700_000]
-    epv = epv_from_ebit_series(
-        ebit_series=ebit_historico,
-        tax_rate=0.34,
-        wacc=0.12,
-        net_debt=10_000_000,
-        norm_method="median",
-    )
-    print(f"\nEPV Enterprise:  R$ {epv['epv_enterprise']:,.0f}" if epv["epv_enterprise"] else "\nEPV: N/D")
-    print(f"EPV Equity:      R$ {epv['epv_equity']:,.0f}" if epv["epv_equity"] else "EPV Equity: N/D")
-    print(f"Flags: {epv['flags']}")
-
-    print("\n" + "="*60)
-    print("EXEMPLO: DCF com premissas hipotéticas")
-    print("="*60)
-
-    dcf = calculate_dcf(
-        base_fcf=4_000_000,
-        growth_rates=[0.12, 0.10, 0.08, 0.06, 0.05],
-        terminal_growth=0.03,
-        wacc=0.12,
-        net_debt=10_000_000,
-    )
-    print(f"\nEnterprise Value: R$ {dcf['enterprise_value']:,.0f}" if dcf["enterprise_value"] else "\nDCF: N/D")
-    print(f"Equity Value:     R$ {dcf['equity_value']:,.0f}" if dcf["equity_value"] else "")
-    print(f"Flags: {dcf['flags']}")
-
-
 # ---------------------------------------------------------------------------
 # Resumo do processamento
 # ---------------------------------------------------------------------------
@@ -303,7 +205,6 @@ Exemplos:
   python -m src.main --start-year 2019 --end-year 2026 --force-download
   python -m src.main --start-year 2019 --end-year 2026 --company-query PETROBRAS
   python -m src.main --start-year 2019 --end-year 2026 --company-query VALE
-  python -m src.main --example
         """,
     )
     parser.add_argument(
@@ -325,39 +226,16 @@ Exemplos:
         help="Busca empresa por nome, CD_CVM ou CNPJ",
     )
     parser.add_argument(
-        "--example",
-        action="store_true",
-        default=False,
-        help="Executa exemplo de cálculo de EPV e DCF",
-    )
-    parser.add_argument(
         "--skip-download",
         action="store_true",
         default=False,
         help="Pula etapa de download (usa cache existente)",
-    )
-    parser.add_argument(
-        "--docs",
-        action="store_true",
-        default=False,
-        help="Baixa e indexa os PDFs do índice IPE (lento: Crawl-Delay de 10s "
-             "por documento; incremental entre execuções)",
-    )
-    parser.add_argument(
-        "--docs-limite",
-        type=int,
-        default=None,
-        help="Teto de documentos baixados nesta rodada de --docs",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-
-    if args.example:
-        run_example()
-        return
 
     years = list(range(args.start_year, args.end_year + 1))
 
@@ -383,13 +261,6 @@ def main() -> None:
     # 4. Processar demonstrativos
     logger.info("Processando demonstrativos financeiros...")
     process_and_save_statements(years)
-    process_and_save_ipe(years)
-
-    # 4b. Documentos (opt-in: horas de Crawl-Delay na primeira carga)
-    if args.docs:
-        from .ipe_docs import indexar
-        logger.info("Baixando e indexando os PDFs do IPE (--docs)...")
-        indexar(limite_total=args.docs_limite)
 
     # 5. Criar template de ticker_mapper
     if not df_cadastro.empty:
