@@ -12,6 +12,11 @@ WORKDIR /app
 # Dependências primeiro, para o cache de camadas valer entre git pulls.
 # tqdm não está no requirements do painel, mas o downloader do pipeline
 # da CVM importa — sem ele a primeira carga de dados falharia.
+# Pango: o WeasyPrint (lâmina em PDF) desenha o texto com ele.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY finlab/requirements.txt /app/finlab/requirements.txt
 RUN pip install -r /app/finlab/requirements.txt tqdm
 

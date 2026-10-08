@@ -387,3 +387,117 @@ def test_detalhe_traz_janelas_e_sparkline(sandbox):
     assert "janelas" in det and "metricas" in det
     r = carteiras.listar()[0]
     assert isinstance(r["serie_curta"], list)
+
+
+# ---------------------------------------------------------------------------
+# Lâmina em PDF
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def pdf_ok(monkeypatch):
+    pytest.importorskip("weasyprint", reason="WeasyPrint (e o Pango) ausentes")
+    from finlab.backend import lamina_pdf
+    monkeypatch.setattr(lamina_pdf, "etfs", type("E", (), {"get": staticmethod(lambda tk: None)})())
+    return lamina_pdf
+
+
+def test_lamina_pdf_baixa_como_arquivo(sandbox, pdf_ok):
+    from fastapi.testclient import TestClient
+    from finlab.backend.app import app
+
+    c = carteira_padrao(sandbox, nome="Comitê Jarvis Equity Mundo/Brasil")
+    poe_precos(sandbox, {"WEGE3": 60.0, "PETR4": 30.0, "ITUB4": 25.0})
+    poe_bench(sandbox, 110.0)
+    carteiras.atualizar(c["id"])
+    r = TestClient(app).get(f"/api/carteiras/{c['id']}/lamina.pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    disp = r.headers["content-disposition"]
+    assert disp.startswith("attachment;") and ".pdf" in disp
+    assert "Comite Jarvis Equity MundoBrasil" in disp            # nome sem acento nem barra
+    assert "filename*=UTF-8''" in disp
+    assert r.content.startswith(b"%PDF") and r.content.rstrip().endswith(b"%%EOF")
+    assert TestClient(app).get("/api/carteiras/nao-existe/lamina.pdf").status_code == 404
+
+
+def test_lamina_pdf_traz_os_numeros_da_carteira(sandbox, pdf_ok):
+    c = carteira_padrao(sandbox)
+    poe_precos(sandbox, {"WEGE3": 60.0, "PETR4": 30.0, "ITUB4": 25.0})
+    poe_bench(sandbox, 110.0)
+    c = carteiras.atualizar(c["id"])
+    # mesmo dia substitui o ponto: um dia anterior para a série ter dois
+    c["snapshots"].insert(0, {"data": "2020-01-02", "cota": 100.0, "retorno_bench": 0.0})
+    html = pdf_ok.html(c)
+    assert "ROIC de 25%" in html and "Selic acima de 12%" in html
+    assert "+50,0%" in html                         # WEGE3 desde a entrada: 40 → 60
+    assert "fora da banda" in html
+    assert "<polyline" in html                      # gráfico com 2 pontos
+    assert "subestima" in html and "não é recomendação" in html
+    assert pdf_ok.gerar(c).startswith(b"%PDF")
+
+
+def test_lamina_pdf_de_carteira_recem_criada_nao_quebra(sandbox, pdf_ok):
+    c = carteira_padrao(sandbox, nome="<script>alert(1)</script>", posicoes=[
+        {"ticker": "WEGE3", "peso": 1.0}])
+    html = pdf_ok.html(c)
+    assert "<script>" not in html and "&lt;script&gt;" in html
+    assert "segundo ponto" in html                  # sem gráfico com 1 ponto só
+    assert pdf_ok.gerar(c).startswith(b"%PDF")
+
+
+def test_formatacao_pt_br_da_lamina():
+    from finlab.backend import lamina_pdf as L
+    assert L._pct(0.074) == "+7,4%"
+    assert L._pct(-0.131) == "−13,1%"
+    assert L._pct(-0.00001) == "+0,0%"              # sem "−0,0%"
+    assert L._pct(0.172, sinal=False) == "17,2%"
+    assert L._num(1234.5) == "1.234,50"
+    assert L._pp(-0.037) == "−3,7 p.p."
+    assert L._escala(99.6, 111.2) == [95, 100, 105, 110, 115]
+
+
+# ---------------------------------------------------------------------------
+# Preço de entrada: o retorno por papel não zera no rebalanceamento
+# ---------------------------------------------------------------------------
+
+def test_entrada_sobrevive_ao_rebalanceamento(sandbox):
+    """O caso da Comitê Jarvis: rebalanceada hoje, a lâmina mostrava todas as
+    posições em +0,0% com a cota em +7%. Desde a entrada, não zera."""
+    c = carteira_padrao(sandbox)
+    assert c["entradas"]["WEGE3"]["p"] == 40.0 and not c["entradas"]["WEGE3"].get("estimada")
+    poe_precos(sandbox, {"WEGE3": 60.0, "PETR4": 33.0, "ITUB4": 25.0})
+    poe_bench(sandbox, 110.0)
+    c = carteiras.rebalancear(c["id"])
+    assert all(abs(r) < 1e-9 for r in c["atual"]["retornos"].values())   # desde o rebal.: zero
+    e = carteiras.retornos_desde_entrada(c)
+    assert e["WEGE3"]["retorno"] == pytest.approx(0.5)
+    assert e["PETR4"]["retorno"] == pytest.approx(0.1)
+    md = carteiras.lamina_md(c)
+    assert "Desde a entrada" in md and "+50,0%" in md
+
+
+def test_edicao_mantem_entrada_de_quem_fica_e_abre_a_de_quem_entra(sandbox):
+    c = carteira_padrao(sandbox)
+    poe_precos(sandbox, {"WEGE3": 50.0, "PETR4": 30.0, "ITUB4": 25.0, "VALE3": 70.0})
+    c = carteiras.editar(c["id"], {"posicoes": [
+        {"ticker": "WEGE3", "peso": 0.5}, {"ticker": "VALE3", "peso": 0.5}]})
+    assert set(c["entradas"]) == {"WEGE3", "VALE3"}         # PETR4 e ITUB4 saíram
+    assert c["entradas"]["WEGE3"]["p"] == 40.0               # quem fica mantém
+    assert c["entradas"]["VALE3"]["p"] == 70.0               # quem entra, no preço de agora
+
+
+def test_carteira_antiga_estima_entrada_pela_data_de_criacao(sandbox):
+    """Carteira gravada antes do campo: a entrada sai do histórico no dia da
+    criação e fica marcada como estimada."""
+    c = carteira_padrao(sandbox)
+    del c["entradas"]
+    criada = c["criada_em"] = "2020-01-03"               # criada semanas atrás
+    carteiras._gravar(c)
+    for tk, p0 in (("WEGE3", 40.0), ("PETR4", 30.0), ("ITUB4", 25.0)):
+        # histórico: antes da criação, o dia da criação e um feriado depois
+        sandbox["precos"][tk] = [("2020-01-02", 1.0), (criada, p0), ("2020-01-06", 2.0)]
+    poe_precos(sandbox, {"WEGE3": 44.0, "PETR4": 30.0, "ITUB4": 25.0})
+    c = carteiras.atualizar(c["id"])
+    assert c["entradas"]["WEGE3"] == {"p": 40.0, "d": criada, "estimada": True}
+    assert carteiras.retornos_desde_entrada(c)["WEGE3"]["retorno"] == pytest.approx(0.1)
+    assert "estimada" in carteiras.lamina_md(c)

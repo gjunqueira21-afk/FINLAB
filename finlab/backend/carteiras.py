@@ -216,6 +216,7 @@ def detalhe(c: dict) -> dict:
         "bench": {"data0": (c.get("bench") or {}).get("data0"),
                   "disponivel": bool((c.get("bench") or {}).get("preco0"))},
         "atual": c.get("atual") or {},
+        "desde_entrada": retornos_desde_entrada(c),
         "serie": [{"data": s["data"], "cota": s["cota"],
                    "retorno_bench": s.get("retorno_bench")}
                   for s in (c.get("snapshots") or [])],
@@ -279,6 +280,51 @@ def _precos_atuais(tickers: list[str], exigir_frescor: bool = False) -> dict[str
                     "preço e tente de novo.")
         precos[tk] = ponto
     return precos
+
+
+def _garante_entradas(c: dict, series: Optional[dict] = None) -> None:
+    """Preço de ENTRADA de cada posição: o retorno de cada papel na carteira.
+
+    A base muda a cada rebalanceamento (é ela que mantém a cota contínua), e
+    o retorno por papel medido contra ela zera toda vez que o comitê
+    rebalanceia — a lâmina mostrava a cota em +7% com todas as posições em
+    +0,0%. A entrada fica: é o preço de quando o papel entrou na carteira,
+    preservado em rebalanceamentos e edições.
+
+    Carteira criada antes deste campo: a entrada sai do histórico de preços
+    na data de criação e fica marcada como ESTIMADA — se o papel entrou
+    depois, numa edição, o painel não tem como saber.
+    """
+    entradas = c.setdefault("entradas", {})
+    faltam = [p["ticker"] for p in c["posicoes"] if p["ticker"] not in entradas]
+    if not faltam:
+        return
+    if series is None:
+        try:
+            series = _series_precos(faltam)
+        except Exception:
+            return                    # sem histórico agora, tenta na próxima
+    criada = str(c.get("criada_em") or "")[:10]
+    for tk in faltam:
+        pontos = [(str(d)[:10], float(v)) for d, v in (series.get(tk) or [])
+                  if isinstance(v, (int, float))]
+        if not pontos:
+            continue
+        ate = [pt for pt in pontos if pt[0] <= criada]
+        d, v = ate[-1] if ate else pontos[0]
+        entradas[tk] = {"p": v, "d": d, "estimada": True}
+
+
+def retornos_desde_entrada(c: dict) -> dict[str, dict]:
+    """{ticker: {"retorno", "data", "estimada"}} com o preço atual."""
+    precos = (c.get("atual") or {}).get("precos") or {}
+    out = {}
+    for tk, e in (c.get("entradas") or {}).items():
+        p1 = precos.get(tk)
+        if isinstance(p1, (int, float)) and e.get("p"):
+            out[tk] = {"retorno": round(p1 / e["p"] - 1, 6), "data": e.get("d"),
+                       "estimada": bool(e.get("estimada"))}
+    return out
 
 
 def _ponto_benchmark() -> Optional[dict]:
@@ -406,6 +452,7 @@ def criar(payload: dict) -> dict:
         # índice no mesmo dia". Sem fonte agora, fica sem benchmark e o
         # primeiro update que o encontrar abre a série DECLARANDO a data.
         "bench": {"preco0": bench["p"], "data0": bench["d"]} if bench else {},
+        "entradas": {tk: {"p": v["p"], "d": v["d"]} for tk, v in precos.items()},
         "snapshots": [],
         "eventos": [{"data": _agora(), "tipo": "criacao",
                      "texto": f"Carteira criada com {len(posicoes)} posições "
@@ -570,6 +617,7 @@ def atualizar(carteira_id: str) -> dict:
             raise KeyError(carteira_id)
         tickers = [p["ticker"] for p in c["posicoes"]]
         series = _series_precos(tickers)
+        _garante_entradas(c, series)
         fonte = {tk: _ultimo_ponto(series.get(tk) or []) for tk in tickers}
         precos, avisos = _precos_para_update(c, fonte)
         _snapshot(c, precos, _ponto_benchmark(), avisos)
@@ -679,6 +727,7 @@ def editar(carteira_id: str, payload: dict) -> dict:
             # Presente e vazio é erro declarado, não um "nada a fazer": quem
             # mandou uma lista vazia acha que esvaziou a carteira.
             novas = _normaliza_posicoes(payload["posicoes"])
+            _garante_entradas(c)          # antes de trocar: a estimativa usa a criação
             antigos = [p["ticker"] for p in c["posicoes"]]
             uniao = sorted({*antigos, *(p["ticker"] for p in novas)})
             precos = _precos_atuais(uniao, exigir_frescor=True)
@@ -687,6 +736,10 @@ def editar(carteira_id: str, payload: dict) -> dict:
             # congelar no último snapshot apagaria o movimento desde então.
             _snapshot(c, {tk: precos[tk] for tk in antigos}, bench)
             c["posicoes"] = novas
+            entradas = c.get("entradas") or {}
+            c["entradas"] = {p["ticker"]: entradas.get(p["ticker"])
+                             or {"p": precos[p["ticker"]]["p"], "d": precos[p["ticker"]]["d"]}
+                             for p in novas}
             _rebase(c, {p["ticker"]: precos[p["ticker"]] for p in novas})
             _evento(c, "pesos", f"Composição alterada para {len(novas)} "
                                 "posições; base rebalanceada nos preços de agora.")
@@ -792,6 +845,8 @@ def lamina_md(c: dict) -> str:
     rets = atual.get("retornos") or {}
     banda = c["regras"].get("banda") or BANDA_PADRAO
     met = metricas_da_serie(snaps)
+    _garante_entradas(c)
+    entrada = retornos_desde_entrada(c)
 
     L = [f"# {c['nome']} · lâmina da carteira", ""]
     L.append(f"Gerada pelo FinLab em {datetime.now(_TZ).strftime('%d/%m/%Y')} · "
@@ -834,8 +889,8 @@ def lamina_md(c: dict) -> str:
 
     L.append("## Posições")
     L.append("")
-    L.append("| Ticker | Peso alvo | Peso atual | Desvio | Retorno* | Target | Upside | Contribuição* |")
-    L.append("|---|---|---|---|---|---|---|---|")
+    L.append("| Ticker | Peso alvo | Peso atual | Desvio | Desde a entrada | Retorno* | Target | Upside | Contribuição* |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
     for p in sorted(c["posicoes"], key=lambda x: -x["peso"]):
         tk = p["ticker"]
         pa = pesos.get(tk)
@@ -850,10 +905,16 @@ def lamina_md(c: dict) -> str:
         L.append(f"| {tk} | {p['peso'] * 100:.1f}% | "
                  + (f"{pa * 100:.1f}%" if isinstance(pa, (int, float)) else "—")
                  + f" | {_pct(drift) if drift is not None else '—'}{marca} | "
-                 + f"{_pct(ret)} | {alvo_txt} | {up_txt} | {_pct(contrib, 2)} |")
+                 + f"{_pct((entrada.get(tk) or {}).get('retorno'))}"
+                 + ("†" if (entrada.get(tk) or {}).get("estimada") else "")
+                 + f" | {_pct(ret)} | {alvo_txt} | {up_txt} | {_pct(contrib, 2)} |")
     L.append("")
     L.append(f"*\\* retorno e contribuição (peso alvo × retorno, em p.p. da "
-             f"cota) desde o último rebalanceamento ({_dmy(c['base']['data'])}).*")
+             f"cota) desde o último rebalanceamento ({_dmy(c['base']['data'])}). "
+             "\"Desde a entrada\": do preço em que o papel entrou na carteira até hoje.*")
+    if any(e.get("estimada") for e in entrada.values()):
+        L.append(f"*† entrada estimada pelo preço de fechamento na criação da carteira "
+                 f"({_dmy(c['criada_em'])}) — carteira anterior ao registro de entradas.*")
     L.append("")
 
     alertas = atual.get("alertas") or []

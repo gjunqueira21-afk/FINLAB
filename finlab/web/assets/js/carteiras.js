@@ -393,9 +393,9 @@
       ]),
       h('span', { style: 'flex:1 1 auto' }),
       btnAtualizar, btnRebal,
-      h('a', { class: 'btn', href: '/api/carteiras/' + encodeURIComponent(c.id) + '/lamina.md',
-               target: '_blank', title: 'A lâmina quantitativa em markdown — a mesma que o cron gera' },
-        '📄 Lâmina'),
+      h('a', { class: 'btn', href: '/api/carteiras/' + encodeURIComponent(c.id) + '/lamina.pdf',
+               download: '', title: 'Baixa a lâmina da carteira em PDF' },
+        '↓ Lâmina PDF'),
       h('button', { class: 'btn ghost', onclick: () => formCarteira(c) }, '✎ Editar')
     ]));
 
